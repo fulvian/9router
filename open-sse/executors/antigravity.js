@@ -13,6 +13,12 @@ export class AntigravityExecutor extends BaseExecutor {
   buildUrl(model, stream, urlIndex = 0) {
     const baseUrls = this.getBaseUrls();
     const baseUrl = baseUrls[urlIndex] || baseUrls[0];
+
+    // Auto-rewrite deprecated model names
+    let targetModel = model;
+    if (model === "gemini-3-pro-high") targetModel = "gemini-3.1-pro-high";
+    if (model === "gemini-3-pro-low") targetModel = "gemini-3.1-pro-low";
+
     const action = stream ? "streamGenerateContent?alt=sse" : "generateContent";
     return `${baseUrl}/v1internal:${action}`;
   }
@@ -61,10 +67,13 @@ export class AntigravityExecutor extends BaseExecutor {
         : body.request?.toolConfig
     };
 
+    // Standardize model name for request body
+    let targetModel = model;
+
     return {
       ...body,
       project: projectId,
-      model: model,
+      model: targetModel,
       userAgent: "antigravity",
       requestType: "agent",
       requestId: `agent-${crypto.randomUUID()}`,

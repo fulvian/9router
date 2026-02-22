@@ -236,7 +236,7 @@ function extractRequestConfig(body, stream) {
     model: body.model,
     stream: stream
   };
-  
+
   // Add all optional configuration parameters
   const optionalParams = [
     'temperature', 'top_p', 'top_k',
@@ -248,13 +248,13 @@ function extractRequestConfig(body, stream) {
     'n', 'logprobs', 'top_logprobs', 'logit_bias',
     'user', 'parallel_tool_calls'
   ];
-  
+
   for (const param of optionalParams) {
     if (body[param] !== undefined) {
       config[param] = body[param];
     }
   }
-  
+
   return config;
 }
 
@@ -417,7 +417,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   log?.debug?.("REQUEST", `${provider.toUpperCase()} | ${model} | ${msgCount} msgs`);
 
   // Create stream controller for disconnect detection
-  const streamController = createStreamController({ 
+  const streamController = createStreamController({
     onDisconnect: (reason) => {
       // Track request finished (disconnected)
       trackPendingRequest(model, provider, connectionId, false);
@@ -477,7 +477,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       },
       status: "error"
     };
-    saveRequestDetail(errorDetail).catch(() => {});
+    saveRequestDetail(errorDetail).catch(() => { });
 
     if (error.name === "AbortError") {
       streamController.handleError(error);
@@ -488,8 +488,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
   }
 
-  // Handle 401/403 - try token refresh using executor
-  if (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN) {
+  // Handle 401 Unauthorized - try token refresh (token expired/invalid)
+  // Note: 401 indicates authentication issue, token refresh may help
+  if (providerResponse.status === HTTP_STATUS.UNAUTHORIZED) {
+    log?.warn?.("AUTH", `${provider.toUpperCase()} | 401 Unauthorized - attempting token refresh`);
+
     const newCredentials = await refreshWithRetry(
       () => executor.refreshCredentials(credentials, log),
       3,
@@ -497,7 +500,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     );
 
     if (newCredentials?.accessToken || newCredentials?.copilotToken) {
-      log?.info?.("TOKEN", `${provider.toUpperCase()} | refreshed`);
+      log?.info?.("TOKEN", `${provider.toUpperCase()} | token refreshed successfully`);
 
       // Update credentials
       Object.assign(credentials, newCredentials);
@@ -521,13 +524,27 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         if (retryResult.response.ok) {
           providerResponse = retryResult.response;
           providerUrl = retryResult.url;
+          log?.info?.("TOKEN", `${provider.toUpperCase()} | retry with new token succeeded`);
+        } else {
+          log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry with new token returned ${retryResult.response.status}`);
         }
       } catch (retryError) {
-        log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`);
+        log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed: ${retryError.message}`);
       }
     } else {
-      log?.warn?.("TOKEN", `${provider.toUpperCase()} | refresh failed`);
+      // Token refresh failed - this is a critical auth error
+      // The caller (chat.js) will handle marking the account as unavailable
+      log?.error?.("AUTH", `${provider.toUpperCase()} | token refresh FAILED - credentials may be revoked`);
+      // Continue to return error - will trigger fallback in chat.js
     }
+  }
+
+  // Handle 403 Forbidden - DO NOT try refresh (permission/quota issue)
+  // Note: 403 indicates authorization issue (quota exceeded, access denied, etc.)
+  // Token refresh won't help here, so we skip it to avoid unnecessary API calls
+  if (providerResponse.status === HTTP_STATUS.FORBIDDEN) {
+    log?.warn?.("AUTH", `${provider.toUpperCase()} | 403 Forbidden - quota or permission issue (skipping token refresh)`);
+    // Continue to return error - will trigger fallback in chat.js
   }
 
   // Check provider response - return error info for fallback handling
@@ -553,7 +570,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       },
       status: "error"
     };
-    saveRequestDetail(errorDetail).catch(() => {});
+    saveRequestDetail(errorDetail).catch(() => { });
 
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
     console.log(`${COLORS.red}[ERROR] ${errMsg}${COLORS.reset}`);
@@ -805,11 +822,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       providerResponse: responseBody || null,
       response: {
         content: translatedResponse?.choices?.[0]?.message?.content ||
-                 translatedResponse?.content ||
-                 null,
+          translatedResponse?.content ||
+          null,
         thinking: translatedResponse?.choices?.[0]?.message?.reasoning_content ||
-                  translatedResponse?.reasoning_content ||
-                  null,
+          translatedResponse?.reasoning_content ||
+          null,
         finish_reason: translatedResponse?.choices?.[0]?.finish_reason || "unknown"
       },
       status: "success",
@@ -849,11 +866,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   let streamContent = "";
   let streamUsage = null;
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-  
+
   const onStreamComplete = (contentObj, usage, ttftAt) => {
     // contentObj is object { content, thinking }
     streamUsage = usage;
-    
+
     const updatedDetail = {
       provider: provider || "unknown",
       model: model || "unknown",
@@ -875,7 +892,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       status: "success",
       id: streamDetailId
     };
-    
+
     saveRequestDetail(updatedDetail).catch(err => {
       console.error("[RequestDetail] Failed to update streaming content:", err.message);
     });

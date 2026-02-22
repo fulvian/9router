@@ -5,11 +5,11 @@
 export const PROVIDER_MODELS = {
   // OAuth Providers (using alias)
   cc: [  // Claude Code
-    { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    { id: "claude-opus-4-5-20251101", name: "Claude 4.5 Opus" },
-    { id: "claude-sonnet-4-5-20250929", name: "Claude 4.5 Sonnet" },
-    { id: "claude-haiku-4-5-20251001", name: "Claude 4.5 Haiku" },
+    { id: "claude-opus-4.6", name: "Claude Opus 4.6" },
+    { id: "claude-sonnet-4.6", name: "Claude Sonnet 4.6" },
+    { id: "claude-opus-4.5-20251101", name: "Claude 4.5 Opus" },
+    { id: "claude-sonnet-4.5-20250929", name: "Claude 4.5 Sonnet" },
+    { id: "claude-haiku-4.5-20251001", name: "Claude 4.5 Haiku" },
   ],
   cx: [  // OpenAI Codex
     // GPT 5.3 Codex - all thinking levels
@@ -60,13 +60,12 @@ export const PROVIDER_MODELS = {
     { id: "glm-5", name: "GLM 5" },
   ],
   ag: [  // Antigravity - special case: models call different backends
-    { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 Thinking" },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    { id: "gemini-3-1-pro-high", name: "Gemini 3.1 Pro High" },
-    { id: "gemini-3-1-pro-low", name: "Gemini 3.1 Pro Low" },
-    { id: "gemini-3-pro-high", name: "Gemini 3 Pro High" },
-    { id: "gemini-3-pro-low", name: "Gemini 3 Pro Low" },
+    { id: "claude-opus-4.6-thinking", name: "Claude Opus 4.6 (Thinking)" },
+    { id: "claude-sonnet-4.6-thinking", name: "Claude Sonnet 4.6 (Thinking)" },
+    { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)" },
+    { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
     { id: "gemini-3-flash", name: "Gemini 3 Flash" },
+    { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
   ],
   gh: [  // GitHub Copilot - OpenAI models
     { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },

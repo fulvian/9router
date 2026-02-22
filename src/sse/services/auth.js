@@ -1,6 +1,7 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings } from "@/lib/localDb";
 import { isAccountUnavailable, getUnavailableUntil, getEarliestRateLimitedUntil, formatRetryAfter, checkFallbackError } from "open-sse/services/accountFallback.js";
 import { resolveProviderId } from "@/shared/constants/providers.js";
+import { checkAndRefreshToken } from "./tokenRefresh.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -198,6 +199,17 @@ export async function getProviderCredentials(provider, excludeConnectionId = nul
       connection = availableConnections[0];
     }
 
+    // Proactive refresh & repair for OAuth accounts
+    if (connection && connection.authType === "oauth") {
+      const refreshed = await checkAndRefreshToken(providerId, {
+        ...connection,
+        connectionId: connection.id
+      });
+
+      // Update our local connection object with potential repairs (like projectId)
+      connection = { ...connection, ...refreshed };
+    }
+
     return {
       apiKey: connection.apiKey,
       accessToken: connection.accessToken,
@@ -268,11 +280,11 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
 export async function clearAccountError(connectionId, currentConnection) {
   // Only update if currently has error status
   const hasError = currentConnection.testStatus === "unavailable" ||
-                   currentConnection.lastError ||
-                   currentConnection.rateLimitedUntil;
-  
+    currentConnection.lastError ||
+    currentConnection.rateLimitedUntil;
+
   if (!hasError) return; // Skip if already clean
-  
+
   await updateProviderConnection(connectionId, {
     testStatus: "active",
     lastError: null,
@@ -280,7 +292,7 @@ export async function clearAccountError(connectionId, currentConnection) {
     rateLimitedUntil: null,
     backoffLevel: 0
   });
-  log.info("AUTH", `Account ${connectionId.slice(0,8)} error cleared`);
+  log.info("AUTH", `Account ${connectionId.slice(0, 8)} error cleared`);
 }
 
 /**

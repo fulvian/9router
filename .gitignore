@@ -23,6 +23,12 @@
 # misc
 .DS_Store
 *.pem
+*.log
+
+# Sensitive Data & Credentials
+google_credentials.json
+google_token.json
+data/db.json
 
 # debug
 npm-debug.log*

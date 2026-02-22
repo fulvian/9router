@@ -20,47 +20,47 @@ import {
 export const TOKEN_EXPIRY_BUFFER_MS = BUFFER_MS;
 
 // Wrap functions with local logger
-export const refreshAccessToken = (provider, refreshToken, credentials) => 
+export const refreshAccessToken = (provider, refreshToken, credentials) =>
   _refreshAccessToken(provider, refreshToken, credentials, log);
 
-export const refreshClaudeOAuthToken = (refreshToken) => 
+export const refreshClaudeOAuthToken = (refreshToken) =>
   _refreshClaudeOAuthToken(refreshToken, log);
 
-export const refreshGoogleToken = (refreshToken, clientId, clientSecret) => 
+export const refreshGoogleToken = (refreshToken, clientId, clientSecret) =>
   _refreshGoogleToken(refreshToken, clientId, clientSecret, log);
 
-export const refreshQwenToken = (refreshToken) => 
+export const refreshQwenToken = (refreshToken) =>
   _refreshQwenToken(refreshToken, log);
 
-export const refreshCodexToken = (refreshToken) => 
+export const refreshCodexToken = (refreshToken) =>
   _refreshCodexToken(refreshToken, log);
 
-export const refreshIflowToken = (refreshToken) => 
+export const refreshIflowToken = (refreshToken) =>
   _refreshIflowToken(refreshToken, log);
 
-export const refreshGitHubToken = (refreshToken) => 
+export const refreshGitHubToken = (refreshToken) =>
   _refreshGitHubToken(refreshToken, log);
 
-export const refreshCopilotToken = (githubAccessToken) => 
+export const refreshCopilotToken = (githubAccessToken) =>
   _refreshCopilotToken(githubAccessToken, log);
 
-export const getAccessToken = (provider, credentials) => 
+export const getAccessToken = (provider, credentials) =>
   _getAccessToken(provider, credentials, log);
 
-export const refreshTokenByProvider = (provider, credentials) => 
+export const refreshTokenByProvider = (provider, credentials) =>
   _refreshTokenByProvider(provider, credentials, log);
 
-export const formatProviderCredentials = (provider, credentials) => 
+export const formatProviderCredentials = (provider, credentials) =>
   _formatProviderCredentials(provider, credentials, log);
 
-export const getAllAccessTokens = (userInfo) => 
+export const getAllAccessTokens = (userInfo) =>
   _getAllAccessTokens(userInfo, log);
 
 // Local-specific: Update credentials in localDb
 export async function updateProviderCredentials(connectionId, newCredentials) {
   try {
     const updates = {};
-    
+
     if (newCredentials.accessToken) {
       updates.accessToken = newCredentials.accessToken;
     }
@@ -74,11 +74,11 @@ export async function updateProviderCredentials(connectionId, newCredentials) {
     if (newCredentials.providerSpecificData) {
       updates.providerSpecificData = newCredentials.providerSpecificData;
     }
-    
+
     const result = await updateProviderConnection(connectionId, updates);
-    log.info("TOKEN_REFRESH", "Credentials updated in localDb", { 
-      connectionId, 
-      success: !!result 
+    log.info("TOKEN_REFRESH", "Credentials updated in localDb", {
+      connectionId,
+      success: !!result
     });
     return !!result;
   } catch (error) {
@@ -108,7 +108,7 @@ export async function checkAndRefreshToken(provider, credentials) {
       const newCredentials = await getAccessToken(provider, updatedCredentials);
       if (newCredentials && newCredentials.accessToken) {
         await updateProviderCredentials(updatedCredentials.connectionId, newCredentials);
-        
+
         updatedCredentials = {
           ...updatedCredentials,
           accessToken: newCredentials.accessToken,
@@ -117,6 +117,13 @@ export async function checkAndRefreshToken(provider, credentials) {
             ? new Date(Date.now() + newCredentials.expiresIn * 1000).toISOString()
             : updatedCredentials.expiresAt
         };
+      } else {
+        // FIX: Logging esplicito quando il refresh fallisce
+        log.error("TOKEN_REFRESH", `Token refresh failed for ${provider}`, {
+          connectionId: updatedCredentials.connectionId,
+          hasRefreshToken: !!updatedCredentials.refreshToken,
+          hint: "Token potrebbe essere revocato o refresh token invalido"
+        });
       }
     }
   }
@@ -141,13 +148,48 @@ export async function checkAndRefreshToken(provider, credentials) {
             copilotTokenExpiresAt: copilotToken.expiresAt
           }
         });
-        
+
         updatedCredentials.providerSpecificData = {
           ...updatedCredentials.providerSpecificData,
           copilotToken: copilotToken.token,
           copilotTokenExpiresAt: copilotToken.expiresAt
         };
       }
+    }
+  }
+
+  // Antigravity REPAIR: If projectId is missing, try to fetch it
+  if (provider === "antigravity" && !updatedCredentials.projectId) {
+    try {
+      log.info("TOKEN_REFRESH", "Antigravity projectId missing, attempting to repair", {
+        connectionId: updatedCredentials.connectionId
+      });
+
+      // Dynamic import to avoid circular dependencies
+      const { AntigravityService } = await import("../../lib/oauth/services/antigravity.js");
+      const agService = new AntigravityService();
+
+      const { projectId } = await agService.loadCodeAssist(updatedCredentials.accessToken);
+
+      if (projectId) {
+        log.info("TOKEN_REFRESH", "Antigravity projectId recovered", {
+          connectionId: updatedCredentials.connectionId,
+          projectId
+        });
+
+        // Persist the recovered projectId
+        await updateProviderCredentials(updatedCredentials.connectionId, { projectId });
+        updatedCredentials.projectId = projectId;
+      } else {
+        log.warn("TOKEN_REFRESH", "Could not recover Antigravity projectId - user might not be onboarded", {
+          connectionId: updatedCredentials.connectionId
+        });
+      }
+    } catch (error) {
+      log.error("TOKEN_REFRESH", "Error during Antigravity projectId repair", {
+        connectionId: updatedCredentials.connectionId,
+        error: error.message
+      });
     }
   }
 
