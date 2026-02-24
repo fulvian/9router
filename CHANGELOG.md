@@ -1,3 +1,15 @@
+# v0.2.81 (2026-02-24)
+
+## Fixes
+- **Fixed database persistence detection**: Corrected `isCloud` check in `localDb.js` to properly distinguish between Edge/Worker environments and Next.js Node.js runtime. Previously, Next.js polyfills incorrectly triggered in-memory mode, causing all credentials to be lost on server restart.
+- **Fixed missing cloud credential import**: Added logic to `updateLocalTokens()` to import credentials from cloud that are missing locally. Ensures credentials are properly restored on first boot or after database reset.
+- **Fixed concurrent token refresh race condition**: Implemented distributed locking using database state (`refreshLockedUntil`) to prevent multiple Next.js workers from attempting simultaneous OAuth token refreshes. Prevents `invalid_grant` errors that were destroying authentication state.
+
+## Technical Details
+- `src/lib/localDb.js`: Changed `isCloud` detection from `typeof caches !== 'undefined'` to `typeof process === 'undefined' || process.env.NEXT_RUNTIME === 'edge'`
+- `src/app/api/sync/cloud/route.js`: Added second loop in `updateLocalTokens()` to create missing provider connections from cloud data
+- `src/shared/services/tokenRefreshScheduler.js`: Added database-backed distributed locking with 60-second lock timeout to coordinate token refresh across workers
+
 # v0.2.66 (2026-02-06)
 
 ## Features

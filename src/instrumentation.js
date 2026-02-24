@@ -11,7 +11,7 @@ export async function register() {
     // Only run on server side
     if (process.env.NEXT_RUNTIME === 'nodejs') {
         // Initialize Token Refresh Scheduler
-        const { startTokenRefreshScheduler } = await import('./src/shared/services/tokenRefreshScheduler.js');
+        const { startTokenRefreshScheduler } = await import('./shared/services/tokenRefreshScheduler.js');
 
         startTokenRefreshScheduler({
             intervalMs: 2 * 60 * 1000,    // Check every 2 minutes
@@ -21,7 +21,7 @@ export async function register() {
         console.log('[Instrumentation] Token refresh scheduler started');
 
         // Initialize cloud sync
-        const initializeCloudSync = (await import('./src/shared/services/initializeCloudSync.js')).default;
+        const initializeCloudSync = (await import('./shared/services/initializeCloudSync.js')).default;
         await initializeCloudSync();
         console.log('[Instrumentation] Cloud sync initialized');
     }

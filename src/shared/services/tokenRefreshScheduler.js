@@ -173,18 +173,38 @@ export class TokenRefreshScheduler {
     async refreshToken(connection) {
         const lockKey = connection.id;
 
-        // Evita refresh simultanei dello stesso token
+        // FIX: Distributed locking - check if another worker already has a DB lock
+        // This prevents multiple Next.js workers from attempting concurrent refreshes
+        const freshConns = await getProviderConnections({ id: connection.id });
+        const freshConn = freshConns[0];
+
+        if (freshConn && freshConn.refreshLockedUntil) {
+            const lockExpiry = new Date(freshConn.refreshLockedUntil).getTime();
+            if (lockExpiry > Date.now()) {
+                log.debug("TOKEN_SCHEDULER",
+                    `${connection.provider}/${connection.id?.slice(0, 8)} is locked by another worker, skipping`
+                );
+                return null;
+            }
+        }
+
+        // In-memory lock (for this worker)
         if (this.refreshLocks.has(lockKey)) {
             log.debug("TOKEN_SCHEDULER",
-                `${connection.provider}/${connection.id?.slice(0, 8)} already being refreshed, skipping`
+                `${connection.provider}/${connection.id?.slice(0, 8)} already being refreshed in this worker, skipping`
             );
             return null;
         }
 
-        // Acquisisci lock
+        // Acquire in-memory lock
         this.refreshLocks.set(lockKey, Date.now());
 
         try {
+            // FIX: Set DB lock for 60 seconds to block other workers
+            await updateProviderConnection(connection.id, {
+                refreshLockedUntil: new Date(Date.now() + 60000).toISOString()
+            });
+
             // FIX: Retry con exponential backoff (come me4brain)
             const maxRetries = 3;
             for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -218,7 +238,7 @@ export class TokenRefreshScheduler {
                     const expiresIn = newCreds.expiresIn || 3600; // Default 1 ora
                     const newExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-                    // Aggiorna nel database
+                    // Aggiorna nel database (clear lock on success)
                     await updateProviderConnection(connection.id, {
                         accessToken: newCreds.accessToken,
                         refreshToken: newCreds.refreshToken || connection.refreshToken,
@@ -227,7 +247,8 @@ export class TokenRefreshScheduler {
                         testStatus: "active",
                         lastError: null,
                         lastErrorAt: null,
-                        errorCode: null
+                        errorCode: null,
+                        refreshLockedUntil: null
                     });
 
                     this.stats.tokensRefreshed++;
@@ -252,12 +273,13 @@ export class TokenRefreshScheduler {
                             `❌ ${connection.provider}/${connection.id?.slice(0, 8)} TOKEN REVOCATO - richiede re-auth: ${error.message}`
                         );
 
-                        // Aggiorna stato per indicare che richiede re-auth
+                        // Aggiorna stato per indicare che richiede re-auth (clear lock)
                         await updateProviderConnection(connection.id, {
                             testStatus: "unavailable",
                             lastError: "Token revocato - richiede re-authenticazione",
                             lastErrorAt: new Date().toISOString(),
-                            errorCode: 401
+                            errorCode: 401,
+                            refreshLockedUntil: null
                         });
 
                         this.stats.refreshErrors++;
@@ -272,14 +294,17 @@ export class TokenRefreshScheduler {
                         continue; // Ritenta
                     }
 
-                    // Ultimo tentativo fallito
+                    // Ultimo tentativo fallito - clear lock and return
                     this.stats.refreshErrors++;
                     log.error("TOKEN_SCHEDULER",
                         `❌ Refresh failed for ${connection.provider}/${connection.id?.slice(0, 8)} after ${maxRetries} attempts: ${error.message}`
                     );
 
-                    // Non aggiorniamo lastError qui per non interferire con il normale flusso errori
-                    // Il sistema di fallback gestirà l'errore alla prossima richiesta
+                    // Clear DB lock on final failure
+                    await updateProviderConnection(connection.id, {
+                        refreshLockedUntil: null
+                    });
+
                     return null;
                 }
             }
@@ -339,19 +364,16 @@ export class TokenRefreshScheduler {
     }
 }
 
-// Singleton instance
-let schedulerInstance = null;
-
 /**
  * Ottiene l'istanza singleton dello scheduler
  * @param {object} options - Opzioni per creare lo scheduler (solo alla prima chiamata)
  * @returns {TokenRefreshScheduler}
  */
 export function getTokenRefreshScheduler(options = {}) {
-    if (!schedulerInstance) {
-        schedulerInstance = new TokenRefreshScheduler(options);
+    if (!globalThis.schedulerInstance) {
+        globalThis.schedulerInstance = new TokenRefreshScheduler(options);
     }
-    return schedulerInstance;
+    return globalThis.schedulerInstance;
 }
 
 /**
@@ -369,8 +391,8 @@ export function startTokenRefreshScheduler(options = {}) {
  * Ferma lo scheduler
  */
 export function stopTokenRefreshScheduler() {
-    if (schedulerInstance) {
-        schedulerInstance.stop();
+    if (globalThis.schedulerInstance) {
+        globalThis.schedulerInstance.stop();
     }
 }
 

@@ -29,7 +29,7 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const { action } = body;
-    
+
     // Always get machineId from server, don't trust client
     const machineId = await getConsistentMachineId();
 
@@ -281,7 +281,9 @@ async function handleCheck() {
  */
 async function updateLocalTokens(cloudProviders) {
   const localProviders = await getProviderConnections();
+  const localIds = new Set(localProviders.map(p => p.id));
 
+  // 1. Update existing providers
   for (const localProvider of localProviders) {
     const cloudProvider = cloudProviders[localProvider.id];
     if (!cloudProvider) continue;
@@ -297,22 +299,67 @@ async function updateLocalTokens(cloudProviders) {
         refreshToken: cloudProvider.refreshToken,
         expiresAt: cloudProvider.expiresAt,
         expiresIn: cloudProvider.expiresIn,
-        
+
         // Provider specific data
         providerSpecificData: cloudProvider.providerSpecificData || localProvider.providerSpecificData,
-        
+
         // Status fields
         testStatus: cloudProvider.status || "active",
         lastError: cloudProvider.lastError,
         lastErrorAt: cloudProvider.lastErrorAt,
         errorCode: cloudProvider.errorCode,
         rateLimitedUntil: cloudProvider.rateLimitedUntil,
-        
+
         // Metadata
         updatedAt: cloudProvider.updatedAt
       };
 
       await updateProviderConnection(localProvider.id, updates);
+    }
+  }
+
+  // 2. FIX: Import missing providers from cloud (e.g., first boot or after db.json cleared)
+  for (const cloudId of Object.keys(cloudProviders)) {
+    if (!localIds.has(cloudId)) {
+      const cloudProvider = cloudProviders[cloudId];
+      console.log(`[CloudSync] Importing missing provider from cloud: ${cloudProvider.provider}/${cloudId.slice(0, 8)}`);
+
+      await createProviderConnection({
+        id: cloudProvider.id,
+        provider: cloudProvider.provider,
+        authType: cloudProvider.authType || "oauth",
+        name: cloudProvider.name,
+        email: cloudProvider.email,
+        displayName: cloudProvider.displayName,
+        priority: cloudProvider.priority,
+        isActive: cloudProvider.isActive !== false,
+
+        // Tokens
+        accessToken: cloudProvider.accessToken,
+        refreshToken: cloudProvider.refreshToken,
+        expiresAt: cloudProvider.expiresAt,
+        expiresIn: cloudProvider.expiresIn,
+        tokenType: cloudProvider.tokenType,
+        scope: cloudProvider.scope,
+        idToken: cloudProvider.idToken,
+        projectId: cloudProvider.projectId,
+        apiKey: cloudProvider.apiKey,
+
+        // Status
+        testStatus: cloudProvider.testStatus || "active",
+        lastTested: cloudProvider.lastTested,
+        lastError: cloudProvider.lastError,
+        lastErrorAt: cloudProvider.lastErrorAt,
+        errorCode: cloudProvider.errorCode,
+        rateLimitedUntil: cloudProvider.rateLimitedUntil,
+
+        // Provider specific data
+        providerSpecificData: cloudProvider.providerSpecificData,
+
+        // Metadata
+        createdAt: cloudProvider.createdAt,
+        updatedAt: cloudProvider.updatedAt
+      });
     }
   }
 }

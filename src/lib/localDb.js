@@ -5,7 +5,9 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 
-const isCloud = typeof caches !== 'undefined' || typeof caches === 'object';
+// FIX: Correctly detect Edge/Worker environments without false positives from Next.js polyfills
+// Next.js injects a `caches` API in Node.js, so we check for process instead
+const isCloud = typeof process === 'undefined' || process.env.NEXT_RUNTIME === 'edge';
 
 // Get app name - fixed constant to avoid Windows path issues in standalone build
 function getAppName() {
@@ -141,7 +143,7 @@ export async function getDb() {
     // Return in-memory DB for Workers
     if (!dbInstance) {
       const data = cloneDefaultData();
-      dbInstance = new Low({ read: async () => {}, write: async () => {} }, data);
+      dbInstance = new Low({ read: async () => { }, write: async () => { } }, data);
       dbInstance.data = data;
     }
     return dbInstance;
@@ -188,17 +190,17 @@ export async function getDb() {
 export async function getProviderConnections(filter = {}) {
   const db = await getDb();
   let connections = db.data.providerConnections || [];
-  
+
   if (filter.provider) {
     connections = connections.filter(c => c.provider === filter.provider);
   }
   if (filter.isActive !== undefined) {
     connections = connections.filter(c => c.isActive === filter.isActive);
   }
-  
+
   // Sort by priority (lower = higher priority)
   connections.sort((a, b) => (a.priority || 999) - (b.priority || 999));
-  
+
   return connections;
 }
 
@@ -231,12 +233,12 @@ export async function getProviderNodeById(id) {
  */
 export async function createProviderNode(data) {
   const db = await getDb();
-  
+
   // Initialize providerNodes if undefined (backward compatibility)
   if (!db.data.providerNodes) {
     db.data.providerNodes = [];
   }
-  
+
   const now = new Date().toISOString();
 
   const node = {
@@ -264,7 +266,7 @@ export async function updateProviderNode(id, data) {
   if (!db.data.providerNodes) {
     db.data.providerNodes = [];
   }
-  
+
   const index = db.data.providerNodes.findIndex((node) => node.id === id);
 
   if (index === -1) return null;
@@ -288,7 +290,7 @@ export async function deleteProviderNode(id) {
   if (!db.data.providerNodes) {
     db.data.providerNodes = [];
   }
-  
+
   const index = db.data.providerNodes.findIndex((node) => node.id === id);
 
   if (index === -1) return null;
@@ -327,7 +329,7 @@ export async function getProviderConnectionById(id) {
 export async function createProviderConnection(data) {
   const db = await getDb();
   const now = new Date().toISOString();
-  
+
   // Check for existing connection with same provider and email (for OAuth)
   // or same provider and name (for API key)
   let existingIndex = -1;
@@ -340,7 +342,7 @@ export async function createProviderConnection(data) {
       c => c.provider === data.provider && c.authType === "apikey" && c.name === data.name
     );
   }
-  
+
   // If exists, update instead of create
   if (existingIndex !== -1) {
     db.data.providerConnections[existingIndex] = {
@@ -351,7 +353,7 @@ export async function createProviderConnection(data) {
     await db.write();
     return db.data.providerConnections[existingIndex];
   }
-  
+
   // Generate name for OAuth if not provided
   let connectionName = data.name || null;
   if (!connectionName && data.authType === "oauth") {
@@ -375,7 +377,7 @@ export async function createProviderConnection(data) {
     const maxPriority = providerConnections.reduce((max, c) => Math.max(max, c.priority || 0), 0);
     connectionPriority = maxPriority + 1;
   }
-  
+
   // Create new connection - only save fields with actual values
   const connection = {
     id: uuidv4(),
@@ -396,7 +398,7 @@ export async function createProviderConnection(data) {
     "lastTested", "lastError", "lastErrorAt", "rateLimitedUntil", "expiresIn", "errorCode",
     "consecutiveUseCount"
   ];
-  
+
   for (const field of optionalFields) {
     if (data[field] !== undefined && data[field] !== null) {
       connection[field] = data[field];
@@ -407,7 +409,7 @@ export async function createProviderConnection(data) {
   if (data.providerSpecificData && Object.keys(data.providerSpecificData).length > 0) {
     connection.providerSpecificData = data.providerSpecificData;
   }
-  
+
   db.data.providerConnections.push(connection);
   await db.write();
 
@@ -565,7 +567,7 @@ export async function getComboByName(name) {
 export async function createCombo(data) {
   const db = await getDb();
   if (!db.data.combos) db.data.combos = [];
-  
+
   const now = new Date().toISOString();
   const combo = {
     id: uuidv4(),
@@ -574,7 +576,7 @@ export async function createCombo(data) {
     createdAt: now,
     updatedAt: now,
   };
-  
+
   db.data.combos.push(combo);
   await db.write();
   return combo;
@@ -586,16 +588,16 @@ export async function createCombo(data) {
 export async function updateCombo(id, data) {
   const db = await getDb();
   if (!db.data.combos) db.data.combos = [];
-  
+
   const index = db.data.combos.findIndex(c => c.id === id);
   if (index === -1) return null;
-  
+
   db.data.combos[index] = {
     ...db.data.combos[index],
     ...data,
     updatedAt: new Date().toISOString(),
   };
-  
+
   await db.write();
   return db.data.combos[index];
 }
@@ -606,10 +608,10 @@ export async function updateCombo(id, data) {
 export async function deleteCombo(id) {
   const db = await getDb();
   if (!db.data.combos) return false;
-  
+
   const index = db.data.combos.findIndex(c => c.id === id);
   if (index === -1) return false;
-  
+
   db.data.combos.splice(index, 1);
   await db.write();
   return true;
@@ -646,14 +648,14 @@ export async function createApiKey(name, machineId) {
   if (!machineId) {
     throw new Error("machineId is required");
   }
-  
+
   const db = await getDb();
   const now = new Date().toISOString();
-  
+
   // Always use new format: sk-{machineId}-{keyId}-{crc8}
   const { generateApiKeyWithMachine } = await import("@/shared/utils/apiKey");
   const result = generateApiKeyWithMachine(machineId);
-  
+
   const apiKey = {
     id: uuidv4(),
     name: name,
@@ -662,10 +664,10 @@ export async function createApiKey(name, machineId) {
     isActive: true,
     createdAt: now,
   };
-  
+
   db.data.apiKeys.push(apiKey);
   await db.write();
-  
+
   return apiKey;
 }
 
@@ -675,12 +677,12 @@ export async function createApiKey(name, machineId) {
 export async function deleteApiKey(id) {
   const db = await getDb();
   const index = db.data.apiKeys.findIndex(k => k.id === id);
-  
+
   if (index === -1) return false;
-  
+
   db.data.apiKeys.splice(index, 1);
   await db.write();
-  
+
   return true;
 }
 

@@ -7,6 +7,9 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_CLOUD_URL: "https://9router.com",
   },
+  experimental: {
+    instrumentationHook: true,
+  },
   webpack: (config, { isServer }) => {
     // Ignore fs/path modules in browser bundle
     if (!isServer) {

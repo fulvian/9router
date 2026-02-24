@@ -17,7 +17,8 @@ const DATA_DIR = process.env.DATA_DIR || path.join(os.homedir(), ".9router");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
 // Toggle logging (set true to enable file logging for debugging)
-const ENABLE_FILE_LOG = false;
+const ENABLE_FILE_LOG = true;
+const ENABLE_CONSOLE_LOG = true; // Always log to console for debugging
 
 if (!API_KEY) {
   console.error("❌ ROUTER_API_KEY required");
@@ -88,8 +89,19 @@ function collectBodyRaw(req) {
 
 function extractModel(body) {
   try {
-    return JSON.parse(body.toString()).model || null;
-  } catch {
+    const parsed = JSON.parse(body.toString());
+    const model = parsed.model || null;
+    if (ENABLE_CONSOLE_LOG) {
+      console.log(`📋 [DEBUG] extractModel - body.model: "${model}"`);
+      console.log(`📋 [DEBUG] extractModel - body keys: ${Object.keys(parsed).join(", ")}`);
+      // Log also nested request.model if exists
+      if (parsed.request?.model) {
+        console.log(`📋 [DEBUG] extractModel - body.request.model: "${parsed.request.model}"`);
+      }
+    }
+    return model;
+  } catch (e) {
+    if (ENABLE_CONSOLE_LOG) console.log(`📋 [DEBUG] extractModel failed: ${e.message}`);
     return null;
   }
 }
@@ -98,8 +110,17 @@ function getMappedModel(model) {
   if (!model) return null;
   try {
     const db = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
-    return db.mitmAlias?.antigravity?.[model] || null;
-  } catch {
+    const mappedModel = db.mitmAlias?.antigravity?.[model] || null;
+
+    if (ENABLE_CONSOLE_LOG) {
+      console.log(`🗺️ [DEBUG] getMappedModel - input: "${model}"`);
+      console.log(`🗺️ [DEBUG] getMappedModel - output: "${mappedModel}"`);
+      console.log(`🗺️ [DEBUG] Available mappings: ${Object.keys(db.mitmAlias?.antigravity || {}).join(", ")}`);
+    }
+
+    return mappedModel;
+  } catch (e) {
+    if (ENABLE_CONSOLE_LOG) console.log(`🗺️ [DEBUG] getMappedModel failed: ${e.message}`);
     return null;
   }
 }
@@ -174,17 +195,27 @@ async function intercept(req, res, bodyBuffer, mappedModel) {
 const server = https.createServer(sslOptions, async (req, res) => {
   const bodyBuffer = await collectBodyRaw(req);
 
+  // Log ALL incoming requests
+  if (ENABLE_CONSOLE_LOG) {
+    console.log(`\n========== ${new Date().toISOString()} ==========`);
+    console.log(`📥 [DEBUG] Incoming request: ${req.method} ${req.url}`);
+    console.log(`📥 [DEBUG] Content-Type: ${req.headers["content-type"]}`);
+  }
+
   // Save request log if enabled
   if (bodyBuffer.length > 0) saveRequestLog(req.url, bodyBuffer);
 
   // Anti-loop: requests from 9Router bypass interception
   if (req.headers[INTERNAL_REQUEST_HEADER.name] === INTERNAL_REQUEST_HEADER.value) {
+    if (ENABLE_CONSOLE_LOG) console.log(`🔄 [DEBUG] Anti-loop detected, passthrough`);
     return passthrough(req, res, bodyBuffer);
   }
 
   const isChatRequest = CHAT_URL_PATTERNS.some(p => req.url.includes(p));
+  if (ENABLE_CONSOLE_LOG) console.log(`💬 [DEBUG] isChatRequest: ${isChatRequest} (patterns: ${CHAT_URL_PATTERNS.join(", ")})`);
 
   if (!isChatRequest) {
+    if (ENABLE_CONSOLE_LOG) console.log(`⏭️ [DEBUG] Not a chat request, passthrough`);
     return passthrough(req, res, bodyBuffer);
   }
 
@@ -192,10 +223,11 @@ const server = https.createServer(sslOptions, async (req, res) => {
   const mappedModel = getMappedModel(model);
 
   if (!mappedModel) {
+    if (ENABLE_CONSOLE_LOG) console.log(`⚠️ [DEBUG] No mapping found for model "${model}", passthrough to Google`);
     return passthrough(req, res, bodyBuffer);
   }
 
-  console.log(`🔀 ${model} → ${mappedModel}`);
+  console.log(`🔀 [INTERCEPT] ${model} → ${mappedModel}`);
   return intercept(req, res, bodyBuffer, mappedModel);
 });
 
