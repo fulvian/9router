@@ -1,3 +1,20 @@
+# v0.2.82 (2026-03-02)
+
+## Stability & Memory Fixes
+
+- **Resolved system-blocking memory leaks**: Implemented several critical fixes for long-running `next-server` stability.
+- **Optimized Database Access**: Added a 2-second TTL cache to `localDb.js` reads. Previously, every API call triggered a full disk read and JSON parse of `db.json`, causing massive CPU/RAM spikes and system freezes under load.
+- **Model Lock Garbage Collection**: Added a background GC process to `auth.js` to automatically clear expired model-level rate limit locks. Prevents infinite memory growth of the `modelLocks` Map.
+- **Safe Timer Management**: Fixed timer leaks in `tokenRefreshScheduler.js` by ensuring previous intervals are cleared before re-initialization.
+- **MITM Proxy Optimization**: Disabled heavy JSON logging to disk by default in `mitm/server.js`. Improved memory handling during request interception.
+
+## Technical Details
+
+- `src/lib/localDb.js`: Implemented `lastReadTime` throttling for `getDb()` singleton.
+- `src/sse/services/auth.js`: Added `globalThis._modelLocksGC` interval (5m).
+- `src/mitm/server.js`: Switched `ENABLE_FILE_LOG` to environment-gated default (false).
+- `src/shared/services/tokenRefreshScheduler.js`: Added `clearInterval` safety in `start()`.
+
 # v0.2.81 (2026-02-24)
 
 ## Fixes

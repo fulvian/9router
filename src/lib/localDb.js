@@ -135,6 +135,10 @@ function ensureDbShape(data) {
 // Singleton instance
 let dbInstance = null;
 
+// Variable to track last read time for basic TTL caching
+let lastReadTime = 0;
+const DB_READ_TTL_MS = 2000; // 2 seconds cache for DB reads
+
 /**
  * Get database instance (singleton)
  */
@@ -154,28 +158,33 @@ export async function getDb() {
     dbInstance = new Low(adapter, cloneDefaultData());
   }
 
-  // Always read latest disk state to avoid stale singleton data across route workers.
-  try {
-    await dbInstance.read();
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      console.warn('[DB] Corrupt JSON detected, resetting to defaults...');
+  // Optimized: Only read from disk if TTL expired to prevent heavy GC on concurrent API calls
+  const now = Date.now();
+  if (now - lastReadTime > DB_READ_TTL_MS) {
+    try {
+      await dbInstance.read();
+      lastReadTime = now;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        console.warn('[DB] Corrupt JSON detected, resetting to defaults...');
+        dbInstance.data = cloneDefaultData();
+        await dbInstance.write();
+        lastReadTime = now;
+      } else {
+        throw error;
+      }
+    }
+
+    // Initialize/migrate missing keys for older DB schema versions.
+    if (!dbInstance.data) {
       dbInstance.data = cloneDefaultData();
       await dbInstance.write();
     } else {
-      throw error;
-    }
-  }
-
-  // Initialize/migrate missing keys for older DB schema versions.
-  if (!dbInstance.data) {
-    dbInstance.data = cloneDefaultData();
-    await dbInstance.write();
-  } else {
-    const { data, changed } = ensureDbShape(dbInstance.data);
-    dbInstance.data = data;
-    if (changed) {
-      await dbInstance.write();
+      const { data, changed } = ensureDbShape(dbInstance.data);
+      dbInstance.data = data;
+      if (changed) {
+        await dbInstance.write();
+      }
     }
   }
 

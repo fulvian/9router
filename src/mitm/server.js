@@ -17,8 +17,8 @@ const DATA_DIR = process.env.DATA_DIR || path.join(os.homedir(), ".9router");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
 // Toggle logging (set true to enable file logging for debugging)
-const ENABLE_FILE_LOG = true;
-const ENABLE_CONSOLE_LOG = true; // Always log to console for debugging
+const ENABLE_FILE_LOG = process.env.ENABLE_MITM_LOG === "true"; // Default false for performance
+const ENABLE_CONSOLE_LOG = process.env.NODE_ENV === "development"; // Log to console only in dev
 
 if (!API_KEY) {
   console.error("❌ ROUTER_API_KEY required");
@@ -92,12 +92,7 @@ function extractModel(body) {
     const parsed = JSON.parse(body.toString());
     const model = parsed.model || null;
     if (ENABLE_CONSOLE_LOG) {
-      console.log(`📋 [DEBUG] extractModel - body.model: "${model}"`);
-      console.log(`📋 [DEBUG] extractModel - body keys: ${Object.keys(parsed).join(", ")}`);
-      // Log also nested request.model if exists
-      if (parsed.request?.model) {
-        console.log(`📋 [DEBUG] extractModel - body.request.model: "${parsed.request.model}"`);
-      }
+      console.log(`📋 [DEBUG] extractModel: "${model}"`);
     }
     return model;
   } catch (e) {

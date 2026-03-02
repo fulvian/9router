@@ -34,7 +34,7 @@ const DEFAULT_MODEL_LOCK_MS = 5 * 60 * 1000;
 
 /**
  * Check whether a specific model is temporarily locked on a connection.
- * Expired locks are cleaned up lazily.
+ * Expired locks are cleaned up lazily here, but also by a periodic GC.
  */
 function isModelLocked(connectionId, model) {
   if (!connectionId || !model) return false;
@@ -44,6 +44,18 @@ function isModelLocked(connectionId, model) {
   if (expiry > Date.now()) return true;
   modelLocks.delete(key); // clean up expired
   return false;
+}
+
+// Global GC to prevent memory bloat if many unique keys are added
+if (!globalThis._modelLocksGC) {
+  globalThis._modelLocksGC = setInterval(() => {
+    const now = Date.now();
+    for (const [key, expiry] of modelLocks.entries()) {
+      if (expiry <= now) {
+        modelLocks.delete(key);
+      }
+    }
+  }, 5 * 60 * 1000); // Every 5 minutes
 }
 
 /**

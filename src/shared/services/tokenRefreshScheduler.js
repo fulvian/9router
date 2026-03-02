@@ -47,9 +47,10 @@ export class TokenRefreshScheduler {
      * Avvia lo scheduler
      */
     start() {
+        // FIX: Clear existing interval if any to prevent multiple timer leaks
         if (this.intervalId) {
-            log.warn("TOKEN_SCHEDULER", "Already running");
-            return;
+            clearInterval(this.intervalId);
+            this.intervalId = null;
         }
 
         this.isRunning = true;
