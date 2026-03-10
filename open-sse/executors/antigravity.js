@@ -102,9 +102,9 @@ export class AntigravityExecutor extends BaseExecutor {
       log?.info?.("TOKEN", "Antigravity refreshed");
 
       return {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || credentials.refreshToken,
-        expiresIn: tokens.expires_in,
+        accessToken: tokens.access_token || tokens.accessToken,
+        refreshToken: tokens.refresh_token || tokens.refreshToken || credentials.refreshToken,
+        expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600"),
         projectId: credentials.projectId
       };
     } catch (error) {

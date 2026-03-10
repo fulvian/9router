@@ -107,10 +107,18 @@ export class DefaultExecutor extends BaseExecutor {
     });
     if (!response.ok) return null;
     const tokens = await response.json();
-    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || body.refresh_token, expiresIn: tokens.expires_in };
+    return {
+      accessToken: tokens.access_token || tokens.accessToken,
+      refreshToken: tokens.refresh_token || tokens.refreshToken || body.refresh_token,
+      expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600")
+    };
   }
 
   async refreshWithForm(url, params) {
+    // Add client_id and client_secret for Qwen which requires them
+    if (params.grant_type === "refresh_token" && params.client_id === PROVIDERS.qwen.clientId) {
+      params.client_secret = PROVIDERS.qwen.clientSecret || "";
+    }
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
@@ -118,19 +126,37 @@ export class DefaultExecutor extends BaseExecutor {
     });
     if (!response.ok) return null;
     const tokens = await response.json();
-    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || params.refresh_token, expiresIn: tokens.expires_in };
+    return {
+      accessToken: tokens.access_token || tokens.accessToken,
+      refreshToken: tokens.refresh_token || tokens.refreshToken || params.refresh_token,
+      expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600")
+    };
   }
 
   async refreshIflow(refreshToken) {
+    // For iFlow, we need to pass client_id and client_secret
     const basicAuth = btoa(`${PROVIDERS.iflow.clientId}:${PROVIDERS.iflow.clientSecret}`);
     const response = await fetch(OAUTH_ENDPOINTS.iflow.token, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "Authorization": `Basic ${basicAuth}` },
-      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: PROVIDERS.iflow.clientId, client_secret: PROVIDERS.iflow.clientSecret })
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "Authorization": `Basic ${basicAuth}`
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: PROVIDERS.iflow.clientId,
+        client_secret: PROVIDERS.iflow.clientSecret
+      })
     });
     if (!response.ok) return null;
     const tokens = await response.json();
-    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken, expiresIn: tokens.expires_in };
+    return {
+      accessToken: tokens.access_token || tokens.accessToken,
+      refreshToken: tokens.refresh_token || tokens.refreshToken || refreshToken,
+      expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600")
+    };
   }
 
   async refreshGoogle(refreshToken) {
@@ -141,7 +167,11 @@ export class DefaultExecutor extends BaseExecutor {
     });
     if (!response.ok) return null;
     const tokens = await response.json();
-    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken, expiresIn: tokens.expires_in };
+    return {
+      accessToken: tokens.access_token || tokens.accessToken,
+      refreshToken: tokens.refresh_token || tokens.refreshToken || refreshToken,
+      expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600")
+    };
   }
 
   async refreshKiro(refreshToken) {
@@ -152,7 +182,11 @@ export class DefaultExecutor extends BaseExecutor {
     });
     if (!response.ok) return null;
     const tokens = await response.json();
-    return { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken || refreshToken, expiresIn: tokens.expiresIn };
+    return {
+      accessToken: tokens.access_token || tokens.accessToken,
+      refreshToken: tokens.refresh_token || tokens.refreshToken || refreshToken,
+      expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600")
+    };
   }
 
   async refreshCline(refreshToken) {
@@ -185,7 +219,11 @@ export class DefaultExecutor extends BaseExecutor {
     });
     if (!response.ok) return null;
     const tokens = await response.json();
-    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken, expiresIn: tokens.expires_in };
+    return {
+      accessToken: tokens.access_token || tokens.accessToken,
+      refreshToken: tokens.refresh_token || tokens.refreshToken || refreshToken,
+      expiresIn: parseInt(tokens.expires_in || tokens.expiresIn || "3600")
+    };
   }
 
   async refreshKilocode(refreshToken) {

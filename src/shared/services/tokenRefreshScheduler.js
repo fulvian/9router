@@ -228,15 +228,16 @@ export class TokenRefreshScheduler {
                         refreshToken: connection.refreshToken,
                         accessToken: connection.accessToken,
                         clientId: connection.clientId,
-                        clientSecret: connection.clientSecret
+                        clientSecret: connection.clientSecret,
+                        providerSpecificData: connection.providerSpecificData // Ensure Kiro/etc get their data
                     });
 
-                    if (!newCreds || !newCreds.accessToken) {
+                    if (!newCreds || (!newCreds.accessToken && !newCreds.access_token)) {
                         throw new Error("No access token in refresh response");
                     }
 
                     // Calcola nuova scadenza
-                    const expiresIn = newCreds.expiresIn || 3600; // Default 1 ora
+                    const expiresIn = newCreds.expiresIn || newCreds.expires_in || 3600; // Default 1 ora
                     const newExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
                     // Aggiorna nel database (clear lock on success)
