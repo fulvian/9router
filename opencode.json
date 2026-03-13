@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "lmstudio": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LM Studio (local)",
+      "options": {
+        "baseURL": "http://127.0.0.1:1234/v1"
+      },
+      "models": {
+        "mlx-qwen3.5-9b-claude-4.6-opus-reasoning-distilled": {
+          "name": "Qwen 3.5 9B Claude Opus Distilled"
+        },
+        "qwen3.5-4b-mlx": {
+          "name": "Qwen 3.5 4B MLX"
+        },
+        "qwen3.5-9b-mlx": {
+          "name": "Qwen 3.5 9B MLX"
+        },
+        "qwen/qwen3.5-9b": {
+          "name": "Qwen 3.5 9B"
+        }
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@ const { exec, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const TARGET_HOST = "daily-cloudcode-pa.googleapis.com";
+const TARGET_HOSTS = ["cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com"];
 const IS_WIN = process.platform === "win32";
 const HOSTS_FILE = IS_WIN
   ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "drivers", "etc", "hosts")
@@ -49,12 +49,12 @@ function execElevatedWindows(command) {
 }
 
 /**
- * Check if DNS entry already exists
+ * Check if DNS entries already exist
  */
 function checkDNSEntry() {
   try {
     const hostsContent = fs.readFileSync(HOSTS_FILE, "utf8");
-    return hostsContent.includes(TARGET_HOST);
+    return TARGET_HOSTS.every(host => hostsContent.includes(host));
   } catch {
     return false;
   }
@@ -69,14 +69,16 @@ async function addDNSEntry(sudoPassword) {
     return;
   }
 
-  const entry = `127.0.0.1 ${TARGET_HOST}`;
+  const entries = TARGET_HOSTS.map(host => `127.0.0.1 ${host}`).join("\n");
 
   try {
     if (IS_WIN) {
       // Windows: use elevated echo >> hosts
-      await execElevatedWindows(`echo ${entry} >> "${HOSTS_FILE}"`);
+      for (const host of TARGET_HOSTS) {
+        await execElevatedWindows(`echo 127.0.0.1 ${host} >> "${HOSTS_FILE}"`);
+      }
     } else {
-      await execWithPassword(`echo "${entry}" >> ${HOSTS_FILE}`, sudoPassword);
+      await execWithPassword(`printf "${entries}\n" >> ${HOSTS_FILE}`, sudoPassword);
     }
     // Flush DNS cache
     if (IS_WIN) {
@@ -84,7 +86,7 @@ async function addDNSEntry(sudoPassword) {
     } else {
       await execWithPassword("dscacheutil -flushcache && killall -HUP mDNSResponder", sudoPassword);
     }
-    console.log(`✅ Added DNS entry: ${entry}`);
+    console.log(`✅ Added DNS entries for: ${TARGET_HOSTS.join(", ")}`);
   } catch (error) {
     const msg = error.message?.includes("incorrect password") ? "Wrong sudo password" : "Failed to add DNS entry";
     throw new Error(msg);
@@ -112,7 +114,9 @@ async function removeDNSEntry(sudoPassword) {
         });
       });
     } else {
-      await execWithPassword(`sed -i '' '/${TARGET_HOST}/d' ${HOSTS_FILE}`, sudoPassword);
+      for (const host of TARGET_HOSTS) {
+        await execWithPassword(`sed -i '' '/${host}/d' ${HOSTS_FILE}`, sudoPassword);
+      }
     }
     // Flush DNS cache
     if (IS_WIN) {

@@ -131,6 +131,12 @@ export function getProviderConfig(provider) {
       baseUrl: ANTHROPIC_COMPATIBLE_DEFAULTS.baseUrl,
     };
   }
+  if (provider === "local") {
+    return {
+      ...PROVIDERS.local,
+      baseUrl: process.env.LOCAL_BASE_URL || PROVIDERS.local.baseUrl,
+    };
+  }
   return PROVIDERS[provider] || PROVIDERS.openai;
 }
 
@@ -186,6 +192,11 @@ export function buildProviderUrl(provider, model, stream = true, options = {}) {
     case "minimax":
       // Claude-compatible providers
       return `${config.baseUrl}?beta=true`;
+
+    case "local": {
+      const apiType = getOpenAICompatibleType(provider);
+      return buildOpenAICompatibleUrl(config.baseUrl, apiType);
+    }
 
     default:
       return config.baseUrl;
@@ -278,6 +289,12 @@ export function buildProviderHeaders(provider, credentials, stream = true, body 
         headers["x-api-key"] = credentials.apiKey;
         break;
   
+      case "local":
+        if (credentials.apiKey || credentials.accessToken) {
+          headers["Authorization"] = `Bearer ${credentials.apiKey || credentials.accessToken}`;
+        }
+        break;
+
       default:
         headers["Authorization"] = `Bearer ${credentials.apiKey || credentials.accessToken}`;
         break;

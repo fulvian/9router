@@ -42,8 +42,8 @@ export async function handleChat(request, clientRawRequest = null) {
   const url = new URL(request.url);
   const modelStr = body.model;
   
-  // Count messages (support both messages[] and input[] formats)
-  const msgCount = body.messages?.length || body.input?.length || 0;
+  // Count messages (support messages[], input[], and Gemini contents[])
+  const msgCount = body.messages?.length || body.input?.length || body.contents?.length || 0;
   const toolCount = body.tools?.length || 0;
   const effort = body.reasoning_effort || body.reasoning?.effort || null;
   log.request("POST", `${url.pathname} | ${modelStr} | ${msgCount} msgs${toolCount ? ` | ${toolCount} tools` : ""}${effort ? ` | effort=${effort}` : ""}`);

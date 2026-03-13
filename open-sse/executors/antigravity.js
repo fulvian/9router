@@ -1,9 +1,18 @@
 import crypto from "crypto";
+import { Agent, setGlobalDispatcher } from "undici";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS, OAUTH_ENDPOINTS, HTTP_STATUS, ANTIGRAVITY_HEADERS, INTERNAL_REQUEST_HEADER } from "../config/constants.js";
 import { deriveSessionId } from "../utils/sessionManager.js";
 
 const MAX_RETRY_AFTER_MS = 10000;
+
+// Global agent for MITM proxy - accepts self-signed certificates
+// This must be set globally because Node.js fetch uses undici internally
+setGlobalDispatcher(new Agent({
+  connect: {
+    rejectUnauthorized: false // Allow self-signed certificates from MITM
+  }
+}));
 
 export class AntigravityExecutor extends BaseExecutor {
   constructor() {
@@ -188,13 +197,26 @@ export class AntigravityExecutor extends BaseExecutor {
         retryAttemptsByUrl[urlIndex] = 0;
       }
 
+      // Debug logging for header propagation
+      if (log) {
+        log?.debug?.("ANTIGRAVITY", `Request to URL: ${url}`);
+        log?.debug?.("ANTIGRAVITY", `Anti-loop header: ${INTERNAL_REQUEST_HEADER.name}=${headers[INTERNAL_REQUEST_HEADER.name]}`);
+        log?.debug?.("ANTIGRAVITY", `All headers: ${JSON.stringify(headers, null, 2)}`);
+      }
+
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s safety timeout
+
         const response = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(transformedBody),
-          signal
+          signal: controller.signal
+          // Note: SSL certificate handling is done globally via setGlobalDispatcher above
         });
+
+        clearTimeout(timeoutId);
 
         if (response.status === HTTP_STATUS.RATE_LIMITED || response.status === HTTP_STATUS.SERVICE_UNAVAILABLE) {
           // Try to get retry time from headers first

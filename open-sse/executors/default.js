@@ -117,7 +117,7 @@ export class DefaultExecutor extends BaseExecutor {
   async refreshWithForm(url, params) {
     // Add client_id and client_secret for Qwen which requires them
     if (params.grant_type === "refresh_token" && params.client_id === PROVIDERS.qwen.clientId) {
-      params.client_secret = PROVIDERS.qwen.clientSecret || "";
+      params.client_secret = PROVIDERS.qwen.clientSecret;
     }
     const response = await fetch(url, {
       method: "POST",

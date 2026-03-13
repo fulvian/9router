@@ -1,3 +1,24 @@
+# v0.2.83 (2026-03-13)
+
+## New Providers
+
+- **Added DeepSeek provider**: Full support for DeepSeek API with OpenAI-compatible format (`deepseek/deepseek-chat`, `ds/deepseek-chat`)
+- **Added Groq provider**: Support for Groq's fast inference API (`groq/llama-3.3-70b`, etc.)
+- **Added xAI (Grok) provider**: Support for xAI's Grok models (`xai/grok-2`, etc.)
+- **Added Cerebras provider**: Support for Cerebras fast inference (`cerebras/llama-3.3-70b`, etc.)
+- **Added Mistral provider**: Support for Mistral AI models (`mistral/mistral-large-latest`, etc.)
+
+## Fixes
+
+- **Fixed provider routing configuration**: Added missing `PROVIDERS` config entries for API key-based providers that were causing routing failures
+- **Improved provider model resolution**: Enhanced `getModelInfo()` to correctly resolve provider nodes and aliases
+
+## Technical Details
+
+- `open-sse/config/constants.js`: Added configuration entries for `deepseek`, `groq`, `xai`, `cerebras`, `mistral`
+- `src/shared/constants/providers.js`: Provider definitions already present, now properly linked to executor config
+- `open-sse/config/providerModels.js`: Model mappings already present for new providers
+
 # v0.2.82 (2026-03-02)
 
 ## Stability & Memory Fixes

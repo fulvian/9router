@@ -277,6 +277,35 @@ export const PROVIDERS = {
     },
     tokenUrl: "https://api.cline.bot/api/v1/auth/token",
     refreshUrl: "https://api.cline.bot/api/v1/auth/refresh"
+  },
+  local: {
+    baseUrl: process.env.LOCAL_BASE_URL || "http://localhost:1234/v1",
+    format: "openai"
+  },
+  deepseek: {
+    baseUrl: "https://api.deepseek.com/chat/completions",
+    format: "openai",
+    headers: {}
+  },
+  groq: {
+    baseUrl: "https://api.groq.com/openai/v1/chat/completions",
+    format: "openai",
+    headers: {}
+  },
+  xai: {
+    baseUrl: "https://api.x.ai/v1/chat/completions",
+    format: "openai",
+    headers: {}
+  },
+  cerebras: {
+    baseUrl: "https://api.cerebras.ai/v1/chat/completions",
+    format: "openai",
+    headers: {}
+  },
+  mistral: {
+    baseUrl: "https://api.mistral.ai/v1/chat/completions",
+    format: "openai",
+    headers: {}
   }
 };
 

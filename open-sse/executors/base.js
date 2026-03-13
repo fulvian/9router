@@ -86,11 +86,18 @@ export class BaseExecutor {
       const transformedBody = this.transformRequest(model, body, stream, credentials);
 
       try {
+        // Increase timeout for local/OpenAI-compatible models to avoid "fetch failed (reset after 30s)" errors
+        const isLocal = this.provider === 'local' || this.provider?.startsWith?.('openai-compatible-');
+        const timeout = isLocal ? 300000 : 90000; // 5 min for local, 90s for cloud
+
+        const signals = [AbortSignal.timeout(timeout)];
+        if (signal) signals.push(signal);
+
         const response = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(transformedBody),
-          signal
+          signal: AbortSignal.any(signals)
         });
 
         if (this.shouldRetry(response.status, urlIndex)) {

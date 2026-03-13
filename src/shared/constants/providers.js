@@ -21,6 +21,7 @@ export const OAUTH_PROVIDERS = {
 };
 
 export const APIKEY_PROVIDERS = {
+  local: { id: "local", alias: "lo", name: "Local LLM", icon: "terminal", color: "#8B5CF6", textIcon: "LO", website: "http://localhost:1234", passthroughModels: true },
   openrouter: { id: "openrouter", alias: "openrouter", name: "OpenRouter", icon: "router", color: "#F97316", textIcon: "OR", passthroughModels: true, website: "https://openrouter.ai" },
   glm: { id: "glm", alias: "glm", name: "GLM Coding", icon: "code", color: "#2563EB", textIcon: "GL", website: "https://open.bigmodel.cn" },
   kimi: { id: "kimi", alias: "kimi", name: "Kimi", icon: "psychology", color: "#1E3A8A", textIcon: "KM", website: "https://kimi.moonshot.cn" },

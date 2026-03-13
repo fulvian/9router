@@ -163,7 +163,16 @@ export async function refreshGoogleToken(refreshToken, clientId, clientSecret, l
  * Specialized refresh for Qwen OAuth tokens
  */
 export async function refreshQwenToken(refreshToken, log) {
-  const endpoint = OAUTH_ENDPOINTS.qwen.token;
+  const endpoint = PROVIDERS.qwen.tokenUrl || OAUTH_ENDPOINTS.qwen.token;
+  const body = {
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: PROVIDERS.qwen.clientId,
+  };
+  
+  if (PROVIDERS.qwen.clientSecret) {
+    body.client_secret = PROVIDERS.qwen.clientSecret;
+  }
 
   try {
     const response = await fetch(endpoint, {
@@ -172,11 +181,7 @@ export async function refreshQwenToken(refreshToken, log) {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json",
       },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: PROVIDERS.qwen.clientId,
-      }),
+      body: new URLSearchParams(body),
     });
 
     if (response.status === 200) {

@@ -7,7 +7,8 @@ const os = require("os");
 
 // Configuration
 const INTERNAL_REQUEST_HEADER = { name: "x-request-source", value: "local" };
-const TARGET_HOST = "cloudcode-pa.googleapis.com";
+const TARGET_HOSTS = ["cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com"];
+const DEFAULT_TARGET_HOST = "daily-cloudcode-pa.googleapis.com";
 const LOCAL_PORT = 443;
 const ROUTER_URL = "http://localhost:20128/v1/chat/completions";
 const API_KEY = process.env.ROUTER_API_KEY;
@@ -18,7 +19,7 @@ const DB_FILE = path.join(DATA_DIR, "db.json");
 
 // Toggle logging (set true to enable file logging for debugging)
 const ENABLE_FILE_LOG = process.env.ENABLE_MITM_LOG === "true"; // Default false for performance
-const ENABLE_CONSOLE_LOG = process.env.NODE_ENV === "development"; // Log to console only in dev
+const ENABLE_CONSOLE_LOG = true; // Forced for debugging
 
 if (!API_KEY) {
   console.error("❌ ROUTER_API_KEY required");
@@ -67,15 +68,16 @@ function saveResponseLog(url, data) {
 }
 
 // Resolve real IP of target host (bypass /etc/hosts)
-let cachedTargetIP = null;
-async function resolveTargetIP() {
-  if (cachedTargetIP) return cachedTargetIP;
+let cachedTargetIPs = {};
+async function resolveTargetIP(hostname) {
+  if (cachedTargetIPs[hostname]) return cachedTargetIPs[hostname];
   const resolver = new dns.Resolver();
   resolver.setServers(["8.8.8.8"]);
   const resolve4 = promisify(resolver.resolve4.bind(resolver));
-  const addresses = await resolve4(TARGET_HOST);
-  cachedTargetIP = addresses[0];
-  return cachedTargetIP;
+  const targetToResolve = TARGET_HOSTS.includes(hostname) ? hostname : DEFAULT_TARGET_HOST;
+  const addresses = await resolve4(targetToResolve);
+  cachedTargetIPs[hostname] = addresses[0];
+  return cachedTargetIPs[hostname];
 }
 
 function collectBodyRaw(req) {
@@ -121,15 +123,16 @@ function getMappedModel(model) {
 }
 
 async function passthrough(req, res, bodyBuffer) {
-  const targetIP = await resolveTargetIP();
+  const host = req.headers.host || DEFAULT_TARGET_HOST;
+  const targetIP = await resolveTargetIP(host);
 
   const forwardReq = https.request({
     hostname: targetIP,
     port: 443,
     path: req.url,
     method: req.method,
-    headers: { ...req.headers, host: TARGET_HOST },
-    servername: TARGET_HOST,
+    headers: { ...req.headers, host: host },
+    servername: host,
     rejectUnauthorized: false
   }, (forwardRes) => {
     res.writeHead(forwardRes.statusCode, forwardRes.headers);
@@ -201,9 +204,21 @@ const server = https.createServer(sslOptions, async (req, res) => {
   if (bodyBuffer.length > 0) saveRequestLog(req.url, bodyBuffer);
 
   // Anti-loop: requests from 9Router bypass interception
-  if (req.headers[INTERNAL_REQUEST_HEADER.name] === INTERNAL_REQUEST_HEADER.value) {
-    if (ENABLE_CONSOLE_LOG) console.log(`🔄 [DEBUG] Anti-loop detected, passthrough`);
+  const receivedHeaderValue = req.headers[INTERNAL_REQUEST_HEADER.name];
+  if (ENABLE_CONSOLE_LOG) {
+    console.log(`\n🔍 [DEBUG] ===== ANTI-LOOP CHECK =====`);
+    console.log(`🔍 [DEBUG] Header name: ${INTERNAL_REQUEST_HEADER.name}`);
+    console.log(`🔍 [DEBUG] Expected value: ${INTERNAL_REQUEST_HEADER.value}`);
+    console.log(`🔍 [DEBUG] Received value: ${receivedHeaderValue}`);
+    console.log(`🔍 [DEBUG] All headers: ${JSON.stringify(req.headers, null, 2)}`);
+    console.log(`🔍 [DEBUG] Match: ${receivedHeaderValue === INTERNAL_REQUEST_HEADER.value}`);
+  }
+
+  if (receivedHeaderValue === INTERNAL_REQUEST_HEADER.value) {
+    if (ENABLE_CONSOLE_LOG) console.log(`✅ [DEBUG] Anti-loop detected, passthrough to Google`);
     return passthrough(req, res, bodyBuffer);
+  } else {
+    if (ENABLE_CONSOLE_LOG) console.log(`⚠️ [DEBUG] No anti-loop header found, continuing with interception logic`);
   }
 
   const isChatRequest = CHAT_URL_PATTERNS.some(p => req.url.includes(p));

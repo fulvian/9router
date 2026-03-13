@@ -46,7 +46,26 @@ cleanup_dns() {
     if [ -f "./scripts/dns-manager.sh" ]; then
         sudo ./scripts/dns-manager.sh remove
     else
-        log_warn "dns-manager.sh not found, manual DNS cleanup may be required"
+        log_warn "dns-manager.sh not found, attempting manual DNS cleanup..."
+        
+        # Manual DNS cleanup (fallback se dns-manager.sh non esiste)
+        TARGET_HOST="daily-cloudcode-pa.googleapis.com"
+        HOSTS_FILE="/etc/hosts"
+        
+        # Verifica se entry esiste
+        if grep -q "${TARGET_HOST}" "${HOSTS_FILE}" 2>/dev/null; then
+            log_info "Removing DNS entry for ${TARGET_HOST}..."
+            sudo sed -i '' "/${TARGET_HOST}/d" "${HOSTS_FILE}"
+            
+            # Flush DNS cache
+            log_info "Flushing DNS cache..."
+            sudo dscacheutil -flushcache 2>/dev/null || true
+            sudo killall -HUP mDNSResponder 2>/dev/null || true
+            
+            log_info "✅ DNS entry removed and cache flushed"
+        else
+            log_info "DNS entry not found (already clean)"
+        fi
     fi
 }
 
@@ -130,8 +149,13 @@ start_system() {
     setup_dns
 
     # Avvio in background
-    # Usiamo npm run dev come configurato in package.json
-    nohup npm run dev >> "$LOG_FILE" 2>&1 &
+    if [ "$NODE_ENV" = "production" ]; then
+        log_info "Running in PRODUCTION mode (npm run start)"
+        nohup npm run start >> "$LOG_FILE" 2>&1 &
+    else
+        log_info "Running in DEVELOPMENT mode (npm run dev)"
+        nohup npm run dev >> "$LOG_FILE" 2>&1 &
+    fi
     
     # Salva il PID principale (opzionale, dato che Next spawna molti worker)
     echo $! > ./data/9router.pid

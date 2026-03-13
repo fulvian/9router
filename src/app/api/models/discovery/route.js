@@ -1,24 +1,11 @@
 import { NextResponse } from "next/server";
-import { getModelAliases, setModelAlias, deleteModelAlias, isCloudEnabled, getProviderConnections } from "@/models";
-import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { syncToCloud } from "@/app/api/sync/cloud/route";
+import { getProviderConnections } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 
-// GET /api/models/alias - Get all aliases
-export async function GET() {
-  try {
-    const aliases = await getModelAliases();
-    return NextResponse.json({ aliases });
-  } catch (error) {
-    console.log("Error fetching aliases:", error);
-    return NextResponse.json({ error: "Failed to fetch aliases" }, { status: 500 });
-  }
-}
-
 /**
- * POST /api/models/alias - Unified discovery for all active providers
+ * GET /api/models/discovery - Unified discovery for all active providers
  */
-export async function POST() {
+export async function GET() {
   try {
     const connections = await getProviderConnections({ isActive: true });
     
@@ -47,14 +34,15 @@ export async function POST() {
             headers["anthropic-version"] = "2023-06-01";
             headers["Authorization"] = `Bearer ${conn.apiKey}`;
           } else {
+            // Standard providers don't need dynamic discovery for now 
+            // as their models are mostly static in providerModels.js
             return null;
           }
 
           const response = await fetch(url, {
             method: "GET",
             headers,
-            // Low timeout for local servers to avoid blocking
-            signal: AbortSignal.timeout(3000), 
+            signal: AbortSignal.timeout(5000), // 5s timeout for local servers
           });
 
           if (!response.ok) return null;
@@ -74,6 +62,7 @@ export async function POST() {
             models,
           };
         } catch (e) {
+          console.log(`Discovery failed for ${conn.provider}:`, e.message);
           return null;
         }
       })
@@ -85,59 +74,7 @@ export async function POST() {
 
     return NextResponse.json({ discovered });
   } catch (error) {
-    console.error("Discovery failed:", error);
+    console.error("Discovery service error:", error);
     return NextResponse.json({ error: "Discovery failed" }, { status: 500 });
-  }
-}
-
-// PUT /api/models/alias - Set model alias
-export async function PUT(request) {
-  try {
-    const body = await request.json();
-    const { model, alias } = body;
-
-    if (!model || !alias) {
-      return NextResponse.json({ error: "Model and alias required" }, { status: 400 });
-    }
-
-    await setModelAlias(alias, model);
-    await syncToCloudIfEnabled();
-
-    return NextResponse.json({ success: true, model, alias });
-  } catch (error) {
-    console.log("Error updating alias:", error);
-    return NextResponse.json({ error: "Failed to update alias" }, { status: 500 });
-  }
-}
-
-// DELETE /api/models/alias?alias=xxx - Delete alias
-export async function DELETE(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const alias = searchParams.get("alias");
-
-    if (!alias) {
-      return NextResponse.json({ error: "Alias required" }, { status: 400 });
-    }
-
-    await deleteModelAlias(alias);
-    await syncToCloudIfEnabled();
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.log("Error deleting alias:", error);
-    return NextResponse.json({ error: "Failed to delete alias" }, { status: 500 });
-  }
-}
-
-async function syncToCloudIfEnabled() {
-  try {
-    const cloudEnabled = await isCloudEnabled();
-    if (!cloudEnabled) return;
-
-    const machineId = await getConsistentMachineId();
-    await syncToCloud(machineId);
-  } catch (error) {
-    console.log("Error syncing aliases to cloud:", error);
   }
 }

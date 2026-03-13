@@ -399,7 +399,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   delete translatedBody._toolNameMap;
 
   // Update model in body
-  translatedBody.model = model;
+  // Sanitize model ID: remove leading slashes which can cause double slashes in logs/forwarding (common with local providers)
+  translatedBody.model = (typeof model === 'string' && model.startsWith('/')) ? model.slice(1) : model;
 
   // Get executor for this provider
   const executor = getExecutor(provider);

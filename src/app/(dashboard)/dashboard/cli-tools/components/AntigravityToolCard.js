@@ -23,6 +23,7 @@ export default function AntigravityToolCard({
   const [modelMappings, setModelMappings] = useState({});
   const [modalOpen, setModalOpen] = useState(false);
   const [currentEditingAlias, setCurrentEditingAlias] = useState(null);
+  const [modelAliases, setModelAliases] = useState({});
 
   useEffect(() => {
     if (apiKeys?.length > 0 && !selectedApiKey) {
@@ -31,8 +32,11 @@ export default function AntigravityToolCard({
   }, [apiKeys, selectedApiKey]);
 
   useEffect(() => {
-    fetchStatus();
-    loadSavedMappings();
+    if (isExpanded) {
+      fetchStatus();
+      loadSavedMappings();
+      fetchModelAliases();
+    }
 
     // Poll status every 10 seconds if expanded
     const interval = setInterval(() => {
@@ -41,6 +45,16 @@ export default function AntigravityToolCard({
 
     return () => clearInterval(interval);
   }, [isExpanded]);
+
+  const fetchModelAliases = async () => {
+    try {
+      const res = await fetch("/api/models/alias");
+      const data = await res.json();
+      if (res.ok) setModelAliases(data.aliases || {});
+    } catch (error) {
+      console.log("Error fetching model aliases:", error);
+    }
+  };
 
   const loadSavedMappings = async () => {
     try {
@@ -412,6 +426,7 @@ export default function AntigravityToolCard({
         onSelect={handleModelSelect}
         selectedModel={currentEditingAlias ? modelMappings[currentEditingAlias] : null}
         activeProviders={activeProviders}
+        modelAliases={modelAliases}
         title={`Select model for ${currentEditingAlias}`}
       />
     </Card>
