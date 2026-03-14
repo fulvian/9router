@@ -5,6 +5,8 @@
 - **Fixed DLQ race condition**: Implemented `WriteMutex` and `retryWithBackoff` in `src/lib/dlqDb.js` to prevent `ENOENT` errors when multiple concurrent writes occur. The `lowdb` + `steno` file writer doesn't handle concurrent access, causing temp file rename failures. Now all writes are serialized through a mutex queue with exponential backoff retry for transient errors.
 - **Fixed DNS config variable bug**: Corrected `TARGET_HOST` (singular) references to `TARGET_HOSTS` (plural) in `src/mitm/dns/dnsConfig.js` at lines 68, 101, 108, 127. The singular variable was never defined, only `TARGET_HOSTS` array exists.
 - **Fixed metrics function signatures**: Corrected `trackCacheHit` and `trackCacheMiss` in `src/observability/metrics.js` to accept both `label` and `value` parameters instead of just `label`.
+- **Fixed DNS cleanup fallback in 9router.sh**: The manual DNS cleanup fallback now iterates over all `TARGET_HOSTS` instead of removing only one host, ensuring both `cloudcode-pa.googleapis.com` and `daily-cloudcode-pa.googleapis.com` are cleaned up.
+- **Fixed SSL certificate SANs**: Updated `src/mitm/cert/generate.js` to include all `TARGET_HOSTS` in the Subject Alternative Names extension, ensuring the certificate is valid for both Google Cloud Code endpoints.
 
 ## Testing
 
