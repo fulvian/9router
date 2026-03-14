@@ -1,7 +1,13 @@
 import { HTTP_STATUS } from "../config/constants.js";
+import { getCircuitBreaker, CircuitOpenError } from "@/core/index.js";
+
+const CIRCUIT_BREAKER_ENABLED = process.env.CIRCUIT_BREAKER_ENABLED !== 'false';
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10);
+const CIRCUIT_BREAKER_RESET_TIMEOUT = parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT || '60000', 10);
 
 /**
  * BaseExecutor - Base class for provider executors
+ * Includes Circuit Breaker pattern for resilience
  */
 export class BaseExecutor {
   constructor(provider, config) {
@@ -33,10 +39,7 @@ export class BaseExecutor {
   }
 
   buildHeaders(credentials, stream = true) {
-    const headers = {
-      "Content-Type": "application/json",
-      ...this.config.headers
-    };
+    const headers = { "Content-Type": "application/json", ...this.config.headers };
 
     if (credentials.accessToken) {
       headers["Authorization"] = `Bearer ${credentials.accessToken}`;
@@ -51,7 +54,6 @@ export class BaseExecutor {
     return headers;
   }
 
-  // Override in subclass for provider-specific transformations
   transformRequest(model, body, stream, credentials) {
     return body;
   }
@@ -60,7 +62,6 @@ export class BaseExecutor {
     return status === HTTP_STATUS.RATE_LIMITED && urlIndex + 1 < this.getFallbackCount();
   }
 
-  // Override in subclass for provider-specific refresh
   async refreshCredentials(credentials, log) {
     return null;
   }
@@ -75,8 +76,31 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log }) {
+  async execute({ model, body, stream, credentials, signal, log, idempotencyKey }) {
+    const providerId = this.provider;
     const fallbackCount = this.getFallbackCount();
+    let lastError = null;
+    let lastStatus = 0;
+
+    if (CIRCUIT_BREAKER_ENABLED) {
+      const circuit = getCircuitBreaker(providerId, {
+        failureThreshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        resetTimeout: CIRCUIT_BREAKER_RESET_TIMEOUT
+      });
+
+      return circuit.execute(async () => {
+        return await this._executeInternal({
+          model, body, stream, credentials, signal, log, idempotencyKey, fallbackCount
+        });
+      });
+    }
+
+    return this._executeInternal({
+      model, body, stream, credentials, signal, log, idempotencyKey, fallbackCount
+    });
+  }
+
+  async _executeInternal({ model, body, stream, credentials, signal, log, idempotencyKey, fallbackCount }) {
     let lastError = null;
     let lastStatus = 0;
 
@@ -85,10 +109,13 @@ export class BaseExecutor {
       const headers = this.buildHeaders(credentials, stream);
       const transformedBody = this.transformRequest(model, body, stream, credentials);
 
+      if (idempotencyKey) {
+        headers["Idempotency-Key"] = idempotencyKey;
+      }
+
       try {
-        // Increase timeout for local/OpenAI-compatible models to avoid "fetch failed (reset after 30s)" errors
         const isLocal = this.provider === 'local' || this.provider?.startsWith?.('openai-compatible-');
-        const timeout = isLocal ? 300000 : 90000; // 5 min for local, 90s for cloud
+        const timeout = isLocal ? 300000 : 90000;
 
         const signals = [AbortSignal.timeout(timeout)];
         if (signal) signals.push(signal);
@@ -109,6 +136,7 @@ export class BaseExecutor {
         return { response, url, headers, transformedBody };
       } catch (error) {
         lastError = error;
+        lastStatus = error?.status || 0;
         if (urlIndex + 1 < fallbackCount) {
           log?.debug?.("RETRY", `Error on ${url}, trying fallback ${urlIndex + 1}`);
           continue;
@@ -118,6 +146,25 @@ export class BaseExecutor {
     }
 
     throw lastError || new Error(`All ${fallbackCount} URLs failed with status ${lastStatus}`);
+  }
+
+  getCircuitBreakerState() {
+    if (!CIRCUIT_BREAKER_ENABLED) {
+      return { enabled: false, state: 'disabled' };
+    }
+    
+    const circuit = getCircuitBreaker(this.provider);
+    return {
+      enabled: true,
+      ...circuit.getState()
+    };
+  }
+
+  async resetCircuitBreaker() {
+    if (!CIRCUIT_BREAKER_ENABLED) return;
+    
+    const { resetCircuitBreaker: reset } = await import('@/core/index.js');
+    reset(this.provider);
   }
 }
 

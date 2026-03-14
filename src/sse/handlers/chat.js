@@ -14,39 +14,57 @@ import { HTTP_STATUS } from "open-sse/config/constants.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 
-/**
- * Handle chat completion request
- * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
- * Format detection and translation handled by translator
- */
+import { chatLogger, routerLogger } from "@/observability/logger.js";
+import { trackRequest, trackRequestDuration, trackFallback, trackTokens, trackCost } from "@/observability/metrics.js";
+import { enforceRateLimit, rateLimitResponse } from "@/security/index.js";
+import { getCircuitBreaker, CircuitOpenError } from "@/core/index.js";
+
 export async function handleChat(request, clientRawRequest = null) {
-  let body;
+  const startTime = Date.now()
+  let body
   try {
-    body = await request.json();
+    body = await request.json()
   } catch {
-    log.warn("CHAT", "Invalid JSON body");
-    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
+    chatLogger.warn({ event: "invalid_json" })
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body")
   }
   
-  // Build clientRawRequest for logging (if not provided)
   if (!clientRawRequest) {
-    const url = new URL(request.url);
+    const url = new URL(request.url)
     clientRawRequest = {
       endpoint: url.pathname,
       body,
       headers: Object.fromEntries(request.headers.entries())
-    };
+    }
   }
 
-  // Log request endpoint and model
-  const url = new URL(request.url);
-  const modelStr = body.model;
+  const url = new URL(request.url)
+  const modelStr = body.model
   
-  // Count messages (support messages[], input[], and Gemini contents[])
-  const msgCount = body.messages?.length || body.input?.length || body.contents?.length || 0;
-  const toolCount = body.tools?.length || 0;
-  const effort = body.reasoning_effort || body.reasoning?.effort || null;
-  log.request("POST", `${url.pathname} | ${modelStr} | ${msgCount} msgs${toolCount ? ` | ${toolCount} tools` : ""}${effort ? ` | effort=${effort}` : ""}`);
+  const rateLimitResult = await enforceRateLimit(request)
+  if (!rateLimitResult.allowed) {
+    chatLogger.warn({ 
+      event: "rate_limited", 
+      reason: rateLimitResult.reason,
+      model: modelStr 
+    })
+    return rateLimitResponse(rateLimitResult.retryAfter, rateLimitResult.reason)
+  }
+
+  const msgCount = body.messages?.length || body.input?.length || body.contents?.length || 0
+  const toolCount = body.tools?.length || 0
+  const effort = body.reasoning_effort || body.reasoning?.effort || null
+  
+  chatLogger.info({
+    event: "request",
+    endpoint: url.pathname,
+    model: modelStr,
+    messages: msgCount,
+    tools: toolCount,
+    effort
+  })
+  
+  log.request("POST", `${url.pathname} | ${modelStr} | ${msgCount} msgs${toolCount ? ` | ${toolCount} tools` : ""}${effort ? ` | effort=${effort}` : ""}`)
 
   // Log API key (masked)
   const authHeader = request.headers.get("Authorization");
@@ -97,90 +115,167 @@ export async function handleChat(request, clientRawRequest = null) {
  * Handle single model chat request
  */
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null) {
-  const modelInfo = await getModelInfo(modelStr);
+  const requestStartTime = Date.now()
+  const modelInfo = await getModelInfo(modelStr)
   if (!modelInfo.provider) {
-    log.warn("CHAT", "Invalid model format", { model: modelStr });
-    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
+    chatLogger.warn({ event: "invalid_model", model: modelStr })
+    log.warn("CHAT", "Invalid model format", { model: modelStr })
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format")
   }
 
-  const { provider, model } = modelInfo;
+  const { provider, model } = modelInfo
 
-  // Log model routing (alias → actual model)
+  routerLogger.info({ 
+    event: "routing", 
+    requested: modelStr, 
+    resolved: `${provider}/${model}` 
+  })
+  
   if (modelStr !== `${provider}/${model}`) {
-    log.info("ROUTING", `${modelStr} → ${provider}/${model}`);
+    log.info("ROUTING", `${modelStr} → ${provider}/${model}`)
   } else {
-    log.info("ROUTING", `Provider: ${provider}, Model: ${model}`);
+    log.info("ROUTING", `Provider: ${provider}, Model: ${model}`)
   }
 
-  // Extract userAgent from request
-  const userAgent = request?.headers?.get("user-agent") || "";
+  const userAgent = request?.headers?.get("user-agent") || ""
+  
+  const circuit = getCircuitBreaker(provider)
+  if (circuit.isOpen()) {
+    chatLogger.warn({ 
+      event: "circuit_open", 
+      provider,
+      model,
+      timeUntilReset: circuit.getTimeUntilReset() 
+    })
+    trackFallback(modelStr, "circuit_open", modelStr)
+    trackRequest(provider, model, "circuit_open", "error")
+    return unavailableResponse(
+      HTTP_STATUS.SERVICE_UNAVAILABLE, 
+      `Provider ${provider} is temporarily unavailable`,
+      circuit.getTimeUntilReset()
+    )
+  }
 
-  // Try with available accounts (fallback on errors)
-  let excludeConnectionId = null;
-  let lastError = null;
-  let lastStatus = null;
+  let excludeConnectionId = null
+  let lastError = null
+  let lastStatus = null
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionId, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionId, model)
 
-    // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
       if (credentials?.allRateLimited) {
-        const errorMsg = lastError || credentials.lastError || "Unavailable";
-        const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
-        log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
-        return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        const errorMsg = lastError || credentials.lastError || "Unavailable"
+        const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE
+        chatLogger.warn({ 
+          event: "all_rate_limited", 
+          provider, 
+          model, 
+          error: errorMsg,
+          retryAfter: credentials.retryAfterHuman 
+        })
+        log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`)
+        trackRequest(provider, model, "rate_limited", "error")
+        return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman)
       }
       if (!excludeConnectionId) {
-        log.error("AUTH", `No credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+        chatLogger.error({ event: "no_credentials", provider })
+        log.error("AUTH", `No credentials for provider: ${provider}`)
+        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`)
       }
-      log.warn("CHAT", "No more accounts available", { provider });
-      return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
+      chatLogger.warn({ event: "no_accounts", provider })
+      log.warn("CHAT", "No more accounts available", { provider })
+      return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable")
     }
 
-    // Log account selection
-    const accountId = credentials.connectionId.slice(0, 8);
-    log.info("AUTH", `Using ${provider} account: ${accountId}...`);
+    const accountId = credentials.connectionId.slice(0, 8)
+    chatLogger.debug({ event: "account_selected", provider, account: accountId })
+    log.info("AUTH", `Using ${provider} account: ${accountId}...`)
 
-    const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+    const refreshedCredentials = await checkAndRefreshToken(provider, credentials)
     
-    // Use shared chatCore
-    const result = await handleChatCore({
-      body: { ...body, model: `${provider}/${model}` },
-      modelInfo: { provider, model },
-      credentials: refreshedCredentials,
-      log,
-      clientRawRequest,
-      connectionId: credentials.connectionId,
-      userAgent,
-      apiKey,
-      onCredentialsRefreshed: async (newCreds) => {
-        await updateProviderCredentials(credentials.connectionId, {
-          accessToken: newCreds.accessToken,
-          refreshToken: newCreds.refreshToken,
-          providerSpecificData: newCreds.providerSpecificData,
-          testStatus: "active"
-        });
-      },
-      onRequestSuccess: async () => {
-        await clearAccountError(credentials.connectionId, credentials);
+    try {
+      const result = await handleChatCore({
+        body: { ...body, model: `${provider}/${model}` },
+        modelInfo: { provider, model },
+        credentials: refreshedCredentials,
+        log,
+        clientRawRequest,
+        connectionId: credentials.connectionId,
+        userAgent,
+        apiKey,
+        onCredentialsRefreshed: async (newCreds) => {
+          await updateProviderCredentials(credentials.connectionId, {
+            accessToken: newCreds.accessToken,
+            refreshToken: newCreds.refreshToken,
+            providerSpecificData: newCreds.providerSpecificData,
+            testStatus: "active"
+          })
+        },
+        onRequestSuccess: async () => {
+          await clearAccountError(credentials.connectionId, credentials)
+        }
+      })
+      
+      if (result.success) {
+        const duration = (Date.now() - requestStartTime) / 1000
+        trackRequestDuration(provider, model, duration)
+        trackRequest(provider, model, "success", "subscription")
+        
+        if (result.usage) {
+          trackTokens(provider, model, result.usage.prompt_tokens || 0, "prompt")
+          trackTokens(provider, model, result.usage.completion_tokens || 0, "completion")
+          if (result.cost) {
+            trackCost(provider, model, result.cost)
+          }
+        }
+        
+        chatLogger.info({ 
+          event: "request_success", 
+          provider, 
+          model, 
+          duration,
+          tokens: result.usage 
+        })
+        return result.response
       }
-    });
-    
-    if (result.success) return result.response;
 
-    // Mark account unavailable (auto-calculates cooldown with exponential backoff)
-    const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
-    
-    if (shouldFallback) {
-      log.warn("AUTH", `Account ${accountId}... unavailable (${result.status}), trying fallback`);
-      excludeConnectionId = credentials.connectionId;
-      lastError = result.error;
-      lastStatus = result.status;
-      continue;
+      const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model)
+      
+      if (shouldFallback) {
+        chatLogger.warn({ 
+          event: "account_fallback", 
+          provider, 
+          account: accountId, 
+          status: result.status,
+          error: result.error 
+        })
+        trackFallback(model, model, "account_error")
+        log.warn("AUTH", `Account ${accountId}... unavailable (${result.status}), trying fallback`)
+        excludeConnectionId = credentials.connectionId
+        lastError = result.error
+        lastStatus = result.status
+        continue
+      }
+
+      return result.response
+    } catch (error) {
+      if (error instanceof CircuitOpenError) {
+        chatLogger.warn({ 
+          event: "circuit_open_during_request", 
+          provider, 
+          model,
+          timeUntilReset: error.timeUntilReset 
+        })
+        trackFallback(model, "circuit_open", model)
+        trackRequest(provider, model, "circuit_open", "error")
+        return unavailableResponse(
+          HTTP_STATUS.SERVICE_UNAVAILABLE,
+          `Provider ${provider} is temporarily unavailable`,
+          error.timeUntilReset
+        )
+      }
+      throw error
     }
-
-    return result.response;
   }
 }

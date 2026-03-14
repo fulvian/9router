@@ -1,6 +1,6 @@
 # 9Router Architecture
 
-_Last updated: 2026-02-06_
+_Last updated: 2026-03-14_
 
 ## Executive Summary
 
@@ -17,11 +17,17 @@ Core capabilities:
 - Local persistence for providers, keys, aliases, combos, settings, pricing
 - Usage/cost tracking and request logging
 - Optional cloud sync for multi-device/state sync
+- **Circuit Breaker pattern** for provider resilience
+- **Redis caching** with semantic cache support
+- **Rate limiting** per API key/IP/provider
+- **Dead Letter Queue** for failed requests
+- **Prometheus metrics** and structured logging
 
 Primary runtime model:
 
 - Next.js app routes under `src/app/api/*` implement both dashboard APIs and compatibility APIs
 - A shared SSE/routing core in `src/sse/*` + `open-sse/*` handles provider execution, translation, streaming, fallback, and usage
+- New resilience layer in `src/core/*` provides circuit breaker, retry policies, and idempotency
 
 ## Scope and Boundaries
 
@@ -159,6 +165,90 @@ Usage DB:
 - Scheduler init: `src/lib/initCloudSync.js`, `src/shared/services/initializeCloudSync.js`
 - Periodic task: `src/shared/services/cloudSyncScheduler.js`
 - Control route: `src/app/api/sync/cloud/route.js`
+
+## 6) Resilience & Observability Layer (NEW)
+
+### Core Resilience (`src/core/`)
+
+- **Circuit Breaker** (`CircuitBreaker.js`): Prevents cascading failures by opening circuit after threshold failures
+  - States: CLOSED → OPEN → HALF_OPEN → CLOSED
+  - Configurable failure threshold and reset timeout
+  - Per-provider circuit management via `CircuitBreakerManager.js`
+
+- **Retry Policy** (`RetryPolicy.js`): Exponential backoff with jitter for transient errors
+  - Configurable max attempts, base delay, max delay
+  - Smart retry detection (429, 500, 502, 503, 504, network errors)
+
+- **Idempotency** (`IdempotencyKey.js`): Request deduplication via SHA-256 hashing
+  - Generates unique keys based on request payload
+  - In-memory store with TTL expiration
+
+### Dead Letter Queue (`src/lib/dlqDb.js`)
+
+- Failed requests stored in `~/.9router/dlq.json`
+- API endpoints: `GET/POST/DELETE /api/dlq`
+- Retry capability for failed requests
+- Stats and filtering by provider/model/status
+
+### Observability (`src/observability/`)
+
+- **Structured Logging** (`logger.js`): Pino-based logging with redaction
+  - Sensitive field masking (tokens, API keys)
+  - Context-aware loggers per component
+
+- **Metrics** (`metrics.js`): Prometheus-compatible metrics
+  - Request count, duration, tokens, cost
+  - Fallback events, circuit state, cache hits/misses
+  - Endpoint: `GET /api/metrics`
+
+- **Tracing** (`tracer.js`): OpenTelemetry integration (optional)
+  - Span creation for request tracing
+  - Configurable OTLP endpoint
+
+### Caching (`src/persistence/`, `src/cache/`)
+
+- **Redis Cache** (`redis.client.js`, `cache.js`): Primary cache with in-memory fallback
+  - TTL-based expiration per data type
+  - `getOrSet` pattern for computed values
+
+- **Semantic Cache** (`semantic.cache.js`): Response caching based on query similarity
+  - Cosine similarity matching via embeddings
+  - Configurable similarity threshold (default: 0.95)
+
+### Security (`src/security/`)
+
+- **Rate Limiting** (`rate-limiter.js`): Token bucket algorithm
+  - Per API key, IP, global, and provider limits
+  - Configurable points and duration
+  - `Retry-After` header on limit exceeded
+
+### Environment Variables
+
+```bash
+# Circuit Breaker
+CIRCUIT_BREAKER_ENABLED=true
+CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+CIRCUIT_BREAKER_RESET_TIMEOUT=60000
+
+# DLQ
+DLQ_ENABLED=true
+
+# Observability
+LOG_LEVEL=info
+OTEL_ENABLED=false
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+
+# Cache
+REDIS_ENABLED=true
+REDIS_URL=redis://localhost:6379
+SEMANTIC_CACHE_ENABLED=true
+SEMANTIC_SIMILARITY_THRESHOLD=0.95
+
+# Rate Limiting
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_API_KEY_POINTS=100
+RATE_LIMIT_API_KEY_DURATION=60
+```
 
 ## Request Lifecycle (`/v1/chat/completions`)
 
