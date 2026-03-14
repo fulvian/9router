@@ -111,11 +111,11 @@ export function setActiveRequests(provider, count) {
   activeRequests.set({ provider }, count)
 }
 
-export function trackCacheHit(type = "semantic") {
+export function trackCacheHit(type = "semantic", model = "unknown") {
   cacheHits.inc({ type })
 }
 
-export function trackCacheMiss(type = "semantic") {
+export function trackCacheMiss(type = "semantic", model = "unknown") {
   cacheMisses.inc({ type })
 }
 

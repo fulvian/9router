@@ -22,6 +22,95 @@ if (!isCloud && !fs.existsSync(DATA_DIR)) {
 const defaultData = { entries: [] };
 let dbInstance = null;
 
+// ============================================================================
+// WRITE MUTEX - Serializes all write operations to prevent race conditions
+// ============================================================================
+class WriteMutex {
+  constructor() {
+    this.queue = [];
+    this.isProcessing = false;
+  }
+
+  async runExclusive(fn) {
+    return new Promise((resolve, reject) => {
+      const task = { fn, resolve, reject };
+      this.queue.push(task);
+      
+      if (!this.isProcessing) {
+        this.isProcessing = true;
+        this.processQueue();
+      }
+    });
+  }
+
+  async processQueue() {
+    while (this.queue.length > 0) {
+      const { fn, resolve, reject } = this.queue.shift();
+      
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      } finally {
+        this.isProcessing = false;
+        // Process next item in queue
+        if (this.queue.length > 0) {
+          this.isProcessing = true;
+          this.processQueue();
+        }
+      }
+    }
+  }
+}
+
+// Global write mutex instance
+const writeMutex = new WriteMutex();
+
+// ============================================================================
+// RETRY LOGIC - Exponential backoff for transient errors
+// ============================================================================
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 50) {
+  let lastError;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      
+      // Only retry on ENOENT (file not found) or rename errors (race condition)
+      const isRetryable = 
+        error.code === 'ENOENT' ||
+        error.code === 'EACCES' ||
+        error.code === 'EBUSY' ||
+        error.message?.includes('rename') ||
+        error.message?.includes('ENOENT');
+      
+      if (isRetryable && attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 25;
+        console.warn(`[DLQ] Write failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${Math.round(delay)}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
+// ============================================================================
+// SAFE WRITE - Serializes all writes through mutex with retry
+// ============================================================================
+async function safeWrite(db) {
+  return writeMutex.runExclusive(async () => {
+    return retryWithBackoff(async () => {
+      await db.write();
+    });
+  });
+}
+
 async function getDlqDb() {
   if (isCloud) {
     if (!dbInstance) {
@@ -39,7 +128,7 @@ async function getDlqDb() {
       if (error instanceof SyntaxError) {
         console.warn("[DLQ] Corrupt JSON detected, resetting...");
         dbInstance.data = defaultData;
-        await dbInstance.write();
+        await safeWrite(dbInstance);
       } else {
         throw error;
       }
@@ -81,8 +170,7 @@ export async function addToDlq({ model, provider, request, error, connectionId, 
   };
 
   db.data.entries.push(entry);
-  await db.write();
-
+  await safeWrite(db);
   console.log(`[DLQ] Added entry ${entry.id} for provider=${provider} model=${model}`);
   
   return entry;
@@ -131,7 +219,7 @@ export async function updateDlqEntry(id, updates) {
     updatedAt: new Date().toISOString()
   };
 
-  await db.write();
+  await safeWrite(db);
   return db.data.entries[index];
 }
 
@@ -157,7 +245,7 @@ export async function incrementDlqFailure(id, error) {
     ).toISOString();
   }
 
-  await db.write();
+  await safeWrite(db);
   return entry;
 }
 
@@ -172,8 +260,7 @@ export async function retryDlqEntry(id) {
 
   entry.status = "retrying";
   entry.lastRetryAt = new Date().toISOString();
-  await db.write();
-
+  await safeWrite(db);
   return { success: true, entry };
 }
 
@@ -192,7 +279,7 @@ export async function deleteDlqEntry(id) {
   if (index === -1) return false;
 
   db.data.entries.splice(index, 1);
-  await db.write();
+  await safeWrite(db);
   return true;
 }
 
@@ -209,7 +296,7 @@ export async function clearDlq(filter = {}) {
     });
   }
 
-  await db.write();
+  await safeWrite(db);
   return db.data.entries.length;
 }
 
@@ -221,6 +308,8 @@ export async function getDlqStats() {
   const pendingCount = entries.filter(e => 
     e.status === "pending" && new Date(e.nextRetryAt).getTime() <= now
   ).length;
+
+  const readyForRetry = pendingCount;
 
   return {
     total: entries.length,
@@ -256,7 +345,7 @@ export async function pruneOldEntries(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
 
   const removed = before - db.data.entries.length;
   if (removed > 0) {
-    await db.write();
+    await safeWrite(db);
   }
 
   return removed;

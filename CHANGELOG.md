@@ -1,3 +1,20 @@
+# v0.2.85 (2026-03-14)
+
+## Bug Fixes
+
+- **Fixed DLQ race condition**: Implemented `WriteMutex` and `retryWithBackoff` in `src/lib/dlqDb.js` to prevent `ENOENT` errors when multiple concurrent writes occur. The `lowdb` + `steno` file writer doesn't handle concurrent access, causing temp file rename failures. Now all writes are serialized through a mutex queue with exponential backoff retry for transient errors.
+- **Fixed DNS config variable bug**: Corrected `TARGET_HOST` (singular) references to `TARGET_HOSTS` (plural) in `src/mitm/dns/dnsConfig.js` at lines 68, 101, 108, 127. The singular variable was never defined, only `TARGET_HOSTS` array exists.
+- **Fixed metrics function signatures**: Corrected `trackCacheHit` and `trackCacheMiss` in `src/observability/metrics.js` to accept both `label` and `value` parameters instead of just `label`.
+
+## Testing
+
+- Added `tests/unit/architecture.test.js`: 33 tests verifying module exports and core functionality across all layers (core, observability, security, persistence, cache)
+- Added `tests/integration/resilience.test.js`: 13 tests for layer integration including DLQ concurrent access, circuit breaker behavior, and cache operations
+
+## Documentation
+
+- Updated ARCHITECTURE.md with DLQ race condition mitigation details
+
 # v0.2.84 (2026-03-14)
 
 ## Bug Fixes

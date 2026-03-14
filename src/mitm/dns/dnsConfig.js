@@ -65,7 +65,7 @@ function checkDNSEntry() {
  */
 async function addDNSEntry(sudoPassword) {
   if (checkDNSEntry()) {
-    console.log(`DNS entry for ${TARGET_HOST} already exists`);
+    console.log(`DNS entries for ${TARGET_HOSTS.join(", ")} already exist`);
     return;
   }
 
@@ -98,14 +98,15 @@ async function addDNSEntry(sudoPassword) {
  */
 async function removeDNSEntry(sudoPassword) {
   if (!checkDNSEntry()) {
-    console.log(`DNS entry for ${TARGET_HOST} does not exist`);
+    console.log(`DNS entries for ${TARGET_HOSTS.join(", ")} do not exist`);
     return;
   }
 
   try {
     if (IS_WIN) {
       // Windows: read, filter, write back via elevated PowerShell
-      const psScript = `(Get-Content '${HOSTS_FILE}') | Where-Object { $_ -notmatch '${TARGET_HOST}' } | Set-Content '${HOSTS_FILE}'`;
+      const hostsToRemove = TARGET_HOSTS.map(h => h.replace(/\./g, '\\.')).join('|');
+      const psScript = `(Get-Content '${HOSTS_FILE}') | Where-Object { $_ -notmatch '${hostsToRemove}' } | Set-Content '${HOSTS_FILE}'`;
       const psCommand = `Start-Process powershell -ArgumentList '-Command','${psScript.replace(/'/g, "''")}' -Verb RunAs -Wait`;
       await new Promise((resolve, reject) => {
         exec(`powershell -Command "${psCommand}"`, (error) => {
@@ -124,7 +125,7 @@ async function removeDNSEntry(sudoPassword) {
     } else {
       await execWithPassword("dscacheutil -flushcache && killall -HUP mDNSResponder", sudoPassword);
     }
-    console.log(`✅ Removed DNS entry for ${TARGET_HOST}`);
+    console.log(`✅ Removed DNS entries for ${TARGET_HOSTS.join(", ")}`);
   } catch (error) {
     const msg = error.message?.includes("incorrect password") ? "Wrong sudo password" : "Failed to remove DNS entry";
     throw new Error(msg);

@@ -1,6 +1,6 @@
 # 9Router Architecture
 
-_Last updated: 2026-03-14_
+_Last updated: 2026-03-14 (v0.2.85)_
 
 ## Executive Summary
 
@@ -189,6 +189,7 @@ Usage DB:
 - API endpoints: `GET/POST/DELETE /api/dlq`
 - Retry capability for failed requests
 - Stats and filtering by provider/model/status
+- **Race condition mitigation**: Uses `WriteMutex` class to serialize all write operations through a Promise queue, preventing `ENOENT` errors when multiple concurrent writes occur. Includes `retryWithBackoff` for transient filesystem errors with exponential backoff (50ms base, 3 max retries)
 
 ### Observability (`src/observability/`)
 
