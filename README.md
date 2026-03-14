@@ -719,11 +719,68 @@ Notes:
 - `kr/claude-sonnet-4.5`
 - `kr/claude-haiku-4.5`
 
+**DeepSeek (`deepseek/` or `ds/`)** - API Key:
+- `deepseek/deepseek-chat`
+- `deepseek/deepseek-reasoner`
+
+**Groq (`groq/`)** - API Key:
+- `groq/llama-3.3-70b-versatile`
+- `groq/moonshotai/kimi-k2-instruct`
+
+**xAI (`xai/`)** - API Key:
+- `xai/grok-3`
+- `xai/grok-3-mini`
+
+**Cerebras (`cerebras/`)** - API Key:
+- `cerebras/llama-3.3-70b`
+- `cerebras/qwen-3-32b`
+
+**Mistral (`mistral/`)** - API Key:
+- `mistral/mistral-large-latest`
+- `mistral/devstral-small-latest`
+
+**Custom OpenAI-compatible node** - use the configured prefix:
+- `{prefix}/{model}` → e.g. `deep-seek/deepseek-chat` if prefix is `deep-seek`
+
+**Custom Anthropic-compatible node** - use the configured prefix:
+- `{prefix}/{model}` → e.g. `my-claude/claude-3-5-sonnet` if prefix is `my-claude`
+
 </details>
 
 ---
 
 ## 🐛 Troubleshooting
+
+**`No credentials for provider: deepseek`** (or any provider)
+
+This error means either:
+
+1. **No API key configured** → Dashboard → Providers → Add the provider with your API key
+2. **Using native provider ID but configured as a custom node** → If you added DeepSeek as an OpenAI-compatible node with prefix `deep-seek`, use `deep-seek/deepseek-chat` not `deepseek/deepseek-chat`
+
+Quick rule:
+```
+# Native provider (added via "API Key" flow):
+deepseek/deepseek-chat   ✓
+
+# Custom node (added via "Provider Nodes" flow with prefix "deep-seek"):
+deep-seek/deepseek-chat  ✓
+```
+
+Check which prefix your node uses: Dashboard → Provider Nodes → see the "Prefix" column.
+
+**`Key limit exceeded` / 403 OpenRouter**
+- OpenRouter weekly key limit reached → Rotate key at https://openrouter.ai/settings/keys
+- Or use a different model/provider until reset
+
+**`[400]: Missing reasoning_content field`**
+- Happens with DeepSeek reasoning models when previous conversation has assistant messages with reasoning content
+- Solution: Start a fresh conversation or use a non-reasoning model variant
+
+**`[400]: The requested model is not supported`**
+- GitHub Copilot: model not available on your plan (free vs paid)
+- Codex: model requires Plus/Pro subscription
+- Solution: Check available models in Dashboard → Providers → Test
 
 **"Language model did not provide messages"**
 - Provider quota exhausted → Check dashboard quota tracker

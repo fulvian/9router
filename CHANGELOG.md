@@ -1,3 +1,16 @@
+# v0.2.84 (2026-03-14)
+
+## Bug Fixes
+
+- **Fixed OpenAI-compatible node prefix routing**: Requests using a provider node prefix (e.g. `deep-seek/deepseek-chat`) now correctly resolve to the configured `openai-compatible-*` node. Previously, using `deepseek/deepseek-chat` (native provider ID) when DeepSeek was configured as a custom node would fail with `No credentials for provider: deepseek`.
+- **Clarified provider routing rules**: Native provider IDs (`deepseek/`, `glm/`, etc.) require a direct API key connection. Custom nodes require using the configured prefix (e.g. `deep-seek/`, `local/`).
+- **Fixed Kiro `rateLimitedUntil` stale lock**: Kiro accounts stuck in rate-limit cooldown from previous sessions are now cleared on startup.
+
+## Documentation
+
+- Updated README with clarification on provider node prefix routing vs native provider routing
+- Added troubleshooting notes for `No credentials for provider` errors
+
 # v0.2.83 (2026-03-13)
 
 ## New Providers
